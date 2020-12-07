@@ -81,6 +81,4 @@ public class BaseFS {
         Inode node = new Inode().parse(mem, getInodeAddress(id), 1024);
         return node.read(mem, 0, node.space);
     }
-
-
 }

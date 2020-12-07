@@ -209,6 +209,8 @@ public class MemoryFS extends FuseStubFS {
             String path;
             switch (Platform.getNativePlatform().getOS()) {
                 case WINDOWS:
+                    if (!System.getProperty("file.encoding").equals("UTF-8"))
+                        System.out.println("UTF-8 encoding required! Current encoding: " + System.getProperty("file.encoding"));
                     path = "J:\\";
                     break;
                 default:
@@ -237,6 +239,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int create(String path, @mode_t long mode, FuseFileInfo fi) {
+        System.out.println("create: " + path);
         if (getPath(path) != null) {
             return -ErrorCodes.EEXIST();
         }
@@ -251,6 +254,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int getattr(String path, FileStat stat) {
+        System.out.println("getattr: " + path);
         MemoryPath p = getPath(path);
         if (p != null) {
             p.getattr(stat);
@@ -280,6 +284,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int mkdir(String path, @mode_t long mode) {
+        System.out.println("mkdir: " + path);
         if (getPath(path) != null) {
             return -ErrorCodes.EEXIST();
         }
@@ -294,6 +299,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int read(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
+        System.out.println("read: " + path + " " + Long.toString(size) + " " + Long.toString(offset));
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -306,6 +312,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int readdir(String path, Pointer buf, FuseFillDir filter, @off_t long offset, FuseFileInfo fi) {
+        System.out.println("readdir: " + path + " " + Long.toString(offset));
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -322,6 +329,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int statfs(String path, Statvfs stbuf) {
+        System.out.println("statfs: " + path);
         if (Platform.getNativePlatform().getOS() == WINDOWS) {
             // statfs needs to be implemented on Windows in order to allow for copying
             // data from other devices because winfsp calculates the volume size based
@@ -338,6 +346,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int rename(String path, String newName) {
+        System.out.println("rename: " + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -357,6 +366,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int rmdir(String path) {
+        System.out.println("rmdir: " + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -370,6 +380,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int truncate(String path, long offset) {
+        System.out.println("truncate: " + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -383,6 +394,7 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int unlink(String path) {
+        System.out.println("unlink: " + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -393,11 +405,13 @@ public class MemoryFS extends FuseStubFS {
 
     @Override
     public int open(String path, FuseFileInfo fi) {
+        System.out.println("open: " + path);
         return 0;
     }
 
     @Override
     public int write(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
+        System.out.println("write: " + path + " " + Long.toString(size) + " " + Long.toString(offset));
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
