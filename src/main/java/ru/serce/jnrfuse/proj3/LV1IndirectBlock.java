@@ -2,7 +2,7 @@ package ru.serce.jnrfuse.proj3;
 
 import java.nio.ByteBuffer;
 
-public class LV1IndirectBlock implements writableObject<LV1IndirectBlock> {
+public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
     public int[] subBlocks;
     public int subBlockLen;
 
@@ -70,6 +70,8 @@ public class LV1IndirectBlock implements writableObject<LV1IndirectBlock> {
             if (startAddress >= 1024)
                 startAddress -= 1024;
             else {
+                int mark = mem.reset().position();
+
                 DataBlock d;
                 if(startAddress != 0){
                     if (block != 0)
@@ -78,9 +80,10 @@ public class LV1IndirectBlock implements writableObject<LV1IndirectBlock> {
                         d = new DataBlock(mem, mem.position(), 1024);
                     data.get(d.data, startAddress, Math.min(len, 1024 - startAddress));
                 }else {
-                    d = new DataBlock(data, data.position(), 1024);
+                    d = new DataBlock(data, data.position(), Math.min(1024, data.remaining()));
                 }
-                mem.reset();
+
+                mem.position(mark);
                 blocks[i] = mem.position();
                 d.flush(mem, mem.position());
                 mem.mark();

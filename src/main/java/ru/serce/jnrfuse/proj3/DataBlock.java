@@ -2,13 +2,13 @@ package ru.serce.jnrfuse.proj3;
 
 import java.nio.ByteBuffer;
 
-public class DataBlock implements writableObject<DataBlock>{
+public class DataBlock extends writableObject<DataBlock>{
     public byte[] data;
 
     DataBlock(ByteBuffer mem, int startAddress, int len){
-        data = new byte[len];
+        data = new byte[1024];
         mem.position(startAddress);
-        mem.get(data);
+        mem.get(data, 0, len);
     }
 
     @Override

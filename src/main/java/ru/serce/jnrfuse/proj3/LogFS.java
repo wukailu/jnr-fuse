@@ -13,11 +13,10 @@ import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 import ru.serce.jnrfuse.struct.Statvfs;
 
+import java.io.FileNotFoundException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
 
 import static jnr.ffi.Platform.OS.WINDOWS;
 
@@ -41,184 +40,116 @@ public class LogFS extends FuseStubFS {
     }
 
     private class MemoryDirectory extends MemoryPath {
-        private List<MemoryPath> contents = new ArrayList<>();
 
-        private MemoryDirectory(String name) {
-            super(name);
+        private MemoryDirectory(String path) {
+            super(path);
         }
 
-        private MemoryDirectory(String name, MemoryDirectory parent) {
-            super(name, parent);
-        }
-
-        public synchronized void add(MemoryPath p) {
-            contents.add(p);
-            p.parent = this;
-        }
-
-        private synchronized void deleteChild(MemoryPath child) {
-            contents.remove(child);
-        }
-
-        @Override
-        protected MemoryPath find(String path) {
-            if (super.find(path) != null) {
-                return super.find(path);
-            }
-            while (path.startsWith("/")) {
-                path = path.substring(1);
-            }
-            synchronized (this) {
-                if (!path.contains("/")) {
-                    for (MemoryPath p : contents) {
-                        if (p.name.equals(path)) {
-                            return p;
-                        }
-                    }
-                    return null;
-                }
-                String nextName = path.substring(0, path.indexOf("/"));
-                String rest = path.substring(path.indexOf("/"));
-                for (MemoryPath p : contents) {
-                    if (p.name.equals(nextName)) {
-                        return p.find(rest);
-                    }
-                }
-            }
-            return null;
-        }
-
+        // TODO: fix the permission later
         @Override
         protected void getattr(FileStat stat) {
-            stat.st_mode.set(FileStat.S_IFDIR | 0777);
+            stat.st_mode.set(fs.inodeOf(id).mode);
             stat.st_uid.set(getContext().uid.get());
             stat.st_gid.set(getContext().gid.get());
         }
 
-        private synchronized void mkdir(String lastComponent) {
-            contents.add(new MemoryDirectory(lastComponent, this));
-        }
-
-        public synchronized void mkfile(String lastComponent) {
-            contents.add(new MemoryFile(lastComponent, this));
-        }
-
-        public synchronized void read(Pointer buf, FuseFillDir filler) {
-            for (MemoryPath p : contents) {
-                filler.apply(buf, p.name, null, 0);
+        public void read(Pointer buf, FuseFillDir filler) {
+            DirectoryBlock directoryBlock = fs.getDirectory(id);
+            for (String p : directoryBlock.contents.keySet()) {
+                filler.apply(buf, p, null, 0);
             }
+        }
+
+        public void rename(String oldChildName, String newChildName){
+            DirectoryBlock data = fs.getDirectory(id);
+            Integer o = data.contents.remove(oldChildName);
+            data.contents.put(newChildName, o);
+            updateDirectory(data);
+        }
+
+        public void delete(String childName){
+            DirectoryBlock data = fs.getDirectory(id);
+            data.contents.remove(childName);
+            updateDirectory(data);
+        }
+
+        public void add(String childName, int childID) {
+            DirectoryBlock data = fs.getDirectory(id);
+            data.contents.put(childName, childID);
+            updateDirectory(data);
+        }
+
+        private void updateDirectory(DirectoryBlock data){
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            data.flush(buffer);
+            buffer.flip();
+            fs.write(fs.inodeOf(id), buffer, 0, 1024);
         }
     }
 
     private class MemoryFile extends MemoryPath {
-        private ByteBuffer contents = ByteBuffer.allocate(0);
-
-        private MemoryFile(String name) {
-            super(name);
-        }
-
-        private MemoryFile(String name, MemoryDirectory parent) {
-            super(name, parent);
-        }
-
-        public MemoryFile(String name, String text) {
-            super(name);
-            try {
-                byte[] contentBytes = text.getBytes("UTF-8");
-                contents = ByteBuffer.wrap(contentBytes);
-            } catch (UnsupportedEncodingException e) {
-                // Not going to happen
-            }
+        private MemoryFile(String path) {
+            super(path);
         }
 
         @Override
         protected void getattr(FileStat stat) {
-            stat.st_mode.set(FileStat.S_IFREG | 0777);
-            stat.st_size.set(contents.capacity());
+            stat.st_mode.set(fs.inodeOf(id).mode);
+            stat.st_size.set(fs.inodeOf(path).size);
             stat.st_uid.set(getContext().uid.get());
             stat.st_gid.set(getContext().gid.get());
         }
 
         private int read(Pointer buffer, long size, long offset) {
-            int bytesToRead = (int) Math.min(contents.capacity() - offset, size);
-            byte[] bytesRead = new byte[bytesToRead];
+            Inode inode = fs.inodeOf(this.id);
+            int bytesToRead = (int) Math.min(inode.size - offset, size);
+            byte[] bytesRead = inode.read(fs.mem, (int) offset, (int) size).array();
             synchronized (this) {
-                contents.position((int) offset);
-                contents.get(bytesRead, 0, bytesToRead);
                 buffer.put(0, bytesRead, 0, bytesToRead);
-                contents.position(0); // Rewind
             }
             return bytesToRead;
         }
 
         private synchronized void truncate(long size) {
-            if (size < contents.capacity()) {
-                // Need to create a new, smaller buffer
-                ByteBuffer newContents = ByteBuffer.allocate((int) size);
-                byte[] bytesRead = new byte[(int) size];
-                contents.get(bytesRead);
-                newContents.put(bytesRead);
-                contents = newContents;
+            Inode inode = fs.inodeOf(this.id);
+            if (size < inode.size) {
+                inode.updateSize((int) size);
             }
         }
 
         private int write(Pointer buffer, long bufSize, long writeOffset) {
-            int maxWriteIndex = (int) (writeOffset + bufSize);
             byte[] bytesToWrite = new byte[(int) bufSize];
             synchronized (this) {
-                if (maxWriteIndex > contents.capacity()) {
-                    // Need to create a new, larger buffer
-                    ByteBuffer newContents = ByteBuffer.allocate(maxWriteIndex);
-                    newContents.put(contents);
-                    contents = newContents;
-                }
-                buffer.get(0, bytesToWrite, 0, (int) bufSize);
-                contents.position((int) writeOffset);
-                contents.put(bytesToWrite);
-                contents.position(0); // Rewind
+                buffer.get(writeOffset, bytesToWrite, 0, (int) bufSize);
+                fs.write(fs.inodeOf(id), ByteBuffer.wrap(bytesToWrite), (int) 0, (int) bufSize);
             }
             return (int) bufSize;
         }
     }
 
     private abstract class MemoryPath {
-        private String name;
-        private MemoryDirectory parent;
+        protected String name;
+        protected String path;
+        protected int id;
 
-        private MemoryPath(String name) {
-            this(name, null);
-        }
-
-        private MemoryPath(String name, MemoryDirectory parent) {
-            this.name = name;
-            this.parent = parent;
+        private MemoryPath(String path) {
+            this.path = path;
+            this.name = getLastComponent(path);
+            this.id = fs.inodeNumberOf(path);
+            assert this.id != -1;
         }
 
         private synchronized void delete() {
-            if (parent != null) {
-                parent.deleteChild(this);
-                parent = null;
-            }
+            MemoryDirectory p = getParentPath(path);
+            assert p != null;
+            p.delete(name);
         }
 
-        protected MemoryPath find(String path) {
-            while (path.startsWith("/")) {
-                path = path.substring(1);
-            }
-            if (path.equals(name) || path.isEmpty()) {
-                return this;
-            }
-            return null;
+        private boolean isDiretory(){
+            return (fs.inodeOf(id).mode & FileStat.S_IFDIR) != 0;
         }
 
         protected abstract void getattr(FileStat stat);
-
-        private void rename(String newName) {
-            while (newName.startsWith("/")) {
-                newName = newName.substring(1);
-            }
-            name = newName;
-        }
     }
 
     public static void main(String[] args) {
@@ -238,9 +169,8 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-    private MemoryDirectory rootDirectory = new MemoryDirectory("");
-
-    private Logger logger = new Logger();;
+    private final BaseFS fs = new BaseFS(1024*1024*100);
+    private final Logger logger = new Logger();;
 
     public LogFS() {
         selfTest();
@@ -248,15 +178,14 @@ public class LogFS extends FuseStubFS {
 
     public void selfTest(){
         // Sprinkle some files around
-        rootDirectory.add(new MemoryFile("Sample file.txt", "Hello there, feel free to look around.\n"));
-        rootDirectory.add(new MemoryDirectory("Sample directory"));
-        MemoryDirectory dirWithFiles = new MemoryDirectory("Directory with files");
-        rootDirectory.add(dirWithFiles);
-        dirWithFiles.add(new MemoryFile("hello.txt", "This is some sample text.\n"));
-        dirWithFiles.add(new MemoryFile("hello again.txt", "This another file with text in it! Oh my!\n"));
-        MemoryDirectory nestedDirectory = new MemoryDirectory("Sample nested directory");
-        dirWithFiles.add(nestedDirectory);
-        nestedDirectory.add(new MemoryFile("So deep.txt", "Man, I'm like, so deep in this here file structure.\n"));
+        createFile("/Sample file.txt", "Hello there, feel free to look around.\n");
+        createDirectory("/Sample directory");
+        createDirectory("/Directory with files");
+        createFile("/Directory with files/hello.txt", "This is some sample text.\n");
+        createFile("/Directory with files/hello again.txt", "This another file with text in it! Oh my!\n");
+        createDirectory("/Directory with files/Sample nested directory");
+        createFile("/Directory with files/Sample nested directory/So deep.txt",
+                    "Man, I'm like, so deep in this here file structure.\n");
     }
 
     @Override
@@ -265,12 +194,10 @@ public class LogFS extends FuseStubFS {
         if (getPath(path) != null) {
             return -ErrorCodes.EEXIST();
         }
-        MemoryPath parent = getParentPath(path);
-        if (parent instanceof MemoryDirectory) {
-            ((MemoryDirectory) parent).mkfile(getLastComponent(path));
+        if (createFile(path, "") != -1)
             return 0;
-        }
-        return -ErrorCodes.ENOENT();
+        else
+            return -ErrorCodes.ENOENT();
     }
 
 
@@ -285,8 +212,39 @@ public class LogFS extends FuseStubFS {
         return -ErrorCodes.ENOENT();
     }
 
+    private int createFile(String path, ByteBuffer data, Inode.Handler handler){
+        int inode = fs.createInode(data, handler);
+        MemoryDirectory parent = getParentPath(path);
+        assert parent != null;
+        parent.add(getLastComponent(path), inode);
+        return inode;
+    }
+
+    private int createFile(String path, String text){
+        try {
+            return createFile(path, ByteBuffer.wrap(text.getBytes("UTF-8")), new Inode.SetMode(0777|FileStat.S_IFREG));
+        } catch (UnsupportedEncodingException e) {
+            return -1;
+        }
+    }
+
+    private int createDirectory(String path, long mode){
+        int inode = fs.createDirectory(mode);
+        MemoryDirectory parent = getParentPath(path);
+        if (parent != null){
+            parent.add(getLastComponent(path), inode);
+            return 0;
+        }else{
+            return -ErrorCodes.ENOENT();
+        }
+    }
+
+    private void createDirectory(String path){
+        createDirectory(path, 0777);
+    }
+
     private String getLastComponent(String path) {
-        while (path.substring(path.length() - 1).equals("/")) {
+        while (path.endsWith("/")) {
             path = path.substring(0, path.length() - 1);
         }
         if (path.isEmpty()) {
@@ -295,12 +253,32 @@ public class LogFS extends FuseStubFS {
         return path.substring(path.lastIndexOf("/") + 1);
     }
 
-    private MemoryPath getParentPath(String path) {
-        return rootDirectory.find(path.substring(0, path.lastIndexOf("/")));
+    private String getParentComponent(String path) {
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        assert !path.isEmpty();
+        return path.substring(0, path.lastIndexOf("/"));
+    }
+
+    private MemoryDirectory getParentPath(String path) {
+        MemoryPath p = getPath(getParentComponent(path));
+        if (p instanceof MemoryFile)
+            return null;
+        else
+            return (MemoryDirectory) p;
     }
 
     private MemoryPath getPath(String path) {
-        return rootDirectory.find(path);
+        Inode inode = fs.inodeOf(path);
+        if (inode == null)
+            return null;
+        if ((inode.mode & FileStat.S_IFREG) != 0){
+            return new MemoryFile(path);
+        }else if((inode.mode & FileStat.S_IFDIR) != 0){
+            return new MemoryDirectory(path);
+        }
+        return null;
     }
 
 
@@ -310,12 +288,7 @@ public class LogFS extends FuseStubFS {
         if (getPath(path) != null) {
             return -ErrorCodes.EEXIST();
         }
-        MemoryPath parent = getParentPath(path);
-        if (parent instanceof MemoryDirectory) {
-            ((MemoryDirectory) parent).mkdir(getLastComponent(path));
-            return 0;
-        }
-        return -ErrorCodes.ENOENT();
+        return createDirectory(path, mode);
     }
 
 
@@ -374,16 +347,12 @@ public class LogFS extends FuseStubFS {
         if (p == null) {
             return -ErrorCodes.ENOENT();
         }
-        MemoryPath newParent = getParentPath(newName);
+        MemoryDirectory newParent = getParentPath(newName);
         if (newParent == null) {
             return -ErrorCodes.ENOENT();
         }
-        if (!(newParent instanceof MemoryDirectory)) {
-            return -ErrorCodes.ENOTDIR();
-        }
         p.delete();
-        p.rename(newName.substring(newName.lastIndexOf("/")));
-        ((MemoryDirectory) newParent).add(p);
+        newParent.rename(getLastComponent(path), getLastComponent(newName));
         return 0;
     }
 
@@ -427,12 +396,19 @@ public class LogFS extends FuseStubFS {
     }
 
     @Override
+    public int link(String oldpath, String newpath) {
+        logger.log("link, " + mountPoint + oldpath + ", " + mountPoint + newpath);
+        //TODO: implement hard links
+        return super.link(oldpath, newpath);
+    }
+
+    @Override
     public int open(String path, FuseFileInfo fi) {
         logger.log("open, " + mountPoint + path);
-        MemoryPath p = getPath(path);
-        if (p == null) {
-            return -ErrorCodes.ENOENT();
-        }
+//        MemoryPath p = getPath(path);
+//        if (p == null) {
+//            return -ErrorCodes.ENOENT();
+//        }
         return 0;
     }
 

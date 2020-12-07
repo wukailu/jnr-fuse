@@ -2,7 +2,7 @@ package ru.serce.jnrfuse.proj3;
 
 import java.nio.ByteBuffer;
 
-public class Checkpoint implements writableObject<Checkpoint>{
+public class Checkpoint extends writableObject<Checkpoint>{
     public int lastInodeMap; // point to next block of last inode map
     public long beginTime;
     public long endTime;
@@ -19,6 +19,7 @@ public class Checkpoint implements writableObject<Checkpoint>{
         mem.putInt(lastInodeMap);
         mem.putLong(beginTime);
         mem.putLong(endTime);
+        mem.position(startAddress + 1024);
         return mem.position();
     }
 

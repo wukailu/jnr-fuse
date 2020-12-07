@@ -1,39 +1,39 @@
 package ru.serce.jnrfuse.proj3;
 
+import ru.serce.jnrfuse.struct.FileStat;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-public class Inode implements writableObject<Inode> {
+public class Inode extends writableObject<Inode> {
     public int id;
     public int uid;
     public int gid;
-    public int controlBit;
+    public long mode;
     public long lastAccessTime;
     public long lastModifyTime;
     public long lastChangeTime;
     public long createTime;
     public int space; // occupied space
     public int size; // exact size
-    public int fileType;
-    public int[] hardLinks;
+    public int hardLinks;
     public int[] dataBlocks;
     public int[] lv1Block;
     public int[] lv2Block;
 
 
 
-    Inode(){
-        id = 0;
+    Inode(int id){
+        this.id = id;
         uid = 0;
         gid = 0;
-        controlBit = 0;
+        mode = 0777 | FileStat.S_IFREG;
         lastAccessTime = System.currentTimeMillis();
         lastModifyTime = System.currentTimeMillis();
         createTime = System.currentTimeMillis();
         space = 0;
         size = 0;
-        fileType = 0;
-        hardLinks = new int[0];
+        hardLinks = 1;
         dataBlocks = new int[12];
         lv1Block = new int[1];
         lv2Block = new int[2];
@@ -45,16 +45,14 @@ public class Inode implements writableObject<Inode> {
         mem.putInt(id);
         mem.putInt(uid);
         mem.putInt(gid);
-        mem.putInt(controlBit);
+        mem.putLong(mode);
         mem.putLong(lastAccessTime);
         mem.putLong(lastModifyTime);
         mem.putLong(lastChangeTime);
         mem.putLong(createTime);
         mem.putInt(space);
         mem.putInt(size);
-        mem.putInt(fileType);
-        mem.putInt(hardLinks.length);
-        for(int i: hardLinks) mem.putInt(i);
+        mem.putInt(hardLinks);
         mem.position(startAddress+1024-15*4);
         for (int i: dataBlocks) mem.putInt(i);
         for (int i: lv1Block) mem.putInt(i);
@@ -65,21 +63,18 @@ public class Inode implements writableObject<Inode> {
     @Override
     public Inode parse(ByteBuffer mem, int startAddress, int len) {
         mem.position(startAddress);
-        assert len == 1024;
+        assert len >= 1024;
         id = mem.getInt();
         uid = mem.getInt();
         gid = mem.getInt();
-        controlBit = mem.getInt();
+        mode = mem.getLong();
         lastAccessTime = mem.getLong();
         lastModifyTime = mem.getLong();
         lastChangeTime = mem.getLong();
         createTime = mem.getLong();
         space = mem.getInt();
         size = mem.getInt();
-        fileType = mem.getInt();
-        hardLinks = new int[mem.getInt()];
-        for (int i = 0; i < hardLinks.length; i++)
-            hardLinks[i] = mem.getInt();
+        hardLinks = mem.getInt();
         mem.position(startAddress+1024-15*4);
         for (int i = 0; i < dataBlocks.length; i++)
             dataBlocks[i] = mem.getInt();
@@ -90,6 +85,13 @@ public class Inode implements writableObject<Inode> {
         return this;
     }
 
+    /***
+     * @param mem gloable memory
+     * @param startAddress Start address relative to the file head. 0 is the head of the file.
+     *                     Should be smaller than file size.
+     * @param len The size of bytes to read.
+     * @return Return a ByteBuffer containing required data.
+     */
     public ByteBuffer read(ByteBuffer mem, int startAddress, int len){
         assert len > 0;
         ByteBuffer ret = ByteBuffer.allocate(len);
@@ -133,13 +135,18 @@ public class Inode implements writableObject<Inode> {
         return ret;
     }
 
-
+    /***
+     * @param data  Data to write, start from the data.position().
+     * @param mem   gloable memory
+     * @param startAddress  Start address relative to the file head. 0 is the head of the file.
+     *                      Should be smaller than file size.
+     * @param len   The size of bytes to write, started from data.position().
+     */
     public void write(ByteBuffer data, ByteBuffer mem, int startAddress, int len){
         assert len > 0;
         assert startAddress < size;
-        size = Math.max(size, startAddress + len);
-        space = size & 0xfffffc00;
-        space = (space < size) ? space + 1024: space;
+        updateSize(Math.max(size, startAddress + len));
+        mem.reset();
 
         if (startAddress < dataBlocks.length * 1024){
             LV1IndirectBlock.writeBlocks(data, mem, startAddress, len, dataBlocks);
@@ -154,8 +161,11 @@ public class Inode implements writableObject<Inode> {
             if(len > 0){
                 if (startAddress < 1024 * 256){
                     LV1IndirectBlock indirectBlock = new LV1IndirectBlock();
-                    if (lv1 != 0)
+                    if (lv1 != 0){
+                        int mark = mem.reset().position();
                         indirectBlock.parse(mem, lv1, 1024);
+                        mem.position(mark).mark();
+                    }
                     indirectBlock.write(data, mem, startAddress, len);
                     len -= Math.min(len, 1024 * 256 - startAddress);
                     startAddress = 0;
@@ -174,8 +184,11 @@ public class Inode implements writableObject<Inode> {
             if(len > 0){
                 if (startAddress < 1024 * 256 * 256){
                     LV2IndirectBlock indirectBlock = new LV2IndirectBlock();
-                    if (lv2 != 0)
+                    if (lv2 != 0){
+                        int mark = mem.reset().position();
                         indirectBlock.parse(mem, lv2, 1024);
+                        mem.position(mark).mark();
+                    }
                     indirectBlock.write(data, mem, startAddress, len);
                     len -= Math.min(len, 1024 * 256 - startAddress);
                     startAddress = 0;
@@ -194,5 +207,54 @@ public class Inode implements writableObject<Inode> {
         lastChangeTime = System.currentTimeMillis();
     }
 
+    public void updateSize(int newSize){
+        if (newSize != size){
+            size = newSize;
+            space = size & 0xfffffc00;
+            space = (space < size) ? space + 1024: space;
+        }
+    }
+
+
+    public abstract static class Handler{
+        abstract Inode process(Inode inode);
+    }
+
+    public static class SetMode extends Handler{
+        private final int mode;
+        SetMode(int mode){
+            this.mode = mode;
+        }
+
+        @Override
+        Inode process(Inode inode) {
+            inode.mode = mode;
+            return inode;
+        }
+    }
+
+    public static class Identity extends Handler{
+        Identity(){
+        }
+
+        @Override
+        Inode process(Inode inode) {
+            return inode;
+        }
+    }
+
+    public static class SetAll extends Handler{
+        private Handler[] handlers;
+        SetAll(Handler... handlers){
+            this.handlers = handlers;
+        }
+
+        @Override
+        Inode process(Inode inode) {
+            for(Handler handler: handlers)
+                inode = handler.process(inode);
+            return inode;
+        }
+    }
 
 }

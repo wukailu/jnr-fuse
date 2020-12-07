@@ -4,7 +4,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 
-public class InodeMap implements writableObject<InodeMap>{
+public class InodeMap extends writableObject<InodeMap>{
     public Map<Integer, Integer> inodeMap;
     public int preInodeMapAddress;
 
@@ -22,6 +22,7 @@ public class InodeMap implements writableObject<InodeMap>{
             mem.putInt(entry.getKey());
             mem.putInt(entry.getValue());
         }
+        mem.position(startAddress + 1024);
         return mem.position();
     }
 
