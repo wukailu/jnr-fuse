@@ -3,15 +3,15 @@ package ru.serce.jnrfuse.proj3;
 
 import jnr.ffi.Platform;
 import jnr.ffi.Pointer;
-import jnr.ffi.types.mode_t;
-import jnr.ffi.types.off_t;
-import jnr.ffi.types.size_t;
+import jnr.ffi.types.*;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.FuseStubFS;
+import ru.serce.jnrfuse.NotImplemented;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 import ru.serce.jnrfuse.struct.Statvfs;
+import ru.serce.jnrfuse.struct.Timespec;
 
 import java.io.FileNotFoundException;
 import java.io.UnsupportedEncodingException;
@@ -21,19 +21,22 @@ import java.nio.file.Paths;
 import static jnr.ffi.Platform.OS.WINDOWS;
 
 public class LogFS extends FuseStubFS {
-    private static class Logger{
+    private static class Logger {
         public String info;
         private final int type;
-        Logger(){
+
+        Logger() {
             this(0);
         }
-        Logger(int type){
+
+        Logger(int type) {
             this.type = type;
         }
-        public void log(String subinfo){
-            if(type == 0){
+
+        public void log(String subinfo) {
+            if (type == 0) {
                 System.out.println(subinfo);
-            }else if (type == 1){
+            } else if (type == 1) {
                 info += subinfo + '\n';
             }
         }
@@ -60,14 +63,14 @@ public class LogFS extends FuseStubFS {
             }
         }
 
-        public void rename(String oldChildName, String newChildName){
+        public void rename(String oldChildName, String newChildName) {
             DirectoryBlock data = fs.getDirectory(id);
             Integer o = data.contents.remove(oldChildName);
             data.contents.put(newChildName, o);
             updateDirectory(data);
         }
 
-        public void delete(String childName){
+        public void delete(String childName) {
             DirectoryBlock data = fs.getDirectory(id);
             data.contents.remove(childName);
             updateDirectory(data);
@@ -79,7 +82,7 @@ public class LogFS extends FuseStubFS {
             updateDirectory(data);
         }
 
-        private void updateDirectory(DirectoryBlock data){
+        private void updateDirectory(DirectoryBlock data) {
             ByteBuffer buffer = ByteBuffer.allocate(1024);
             data.flush(buffer);
             buffer.flip();
@@ -145,7 +148,7 @@ public class LogFS extends FuseStubFS {
             p.delete(name);
         }
 
-        private boolean isDiretory(){
+        private boolean isDiretory() {
             return (fs.inodeOf(id).mode & FileStat.S_IFDIR) != 0;
         }
 
@@ -161,7 +164,7 @@ public class LogFS extends FuseStubFS {
                     System.out.println("UTF-8 encoding required! Current encoding: " + System.getProperty("file.encoding"));
                 path = "J:\\";
             } else {
-                path = "/tmp/mntm";
+                path = "/tmp/mnt";
             }
             memfs.mount(Paths.get(path), true, true);
         } finally {
@@ -169,14 +172,15 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-    private final BaseFS fs = new BaseFS(1024*1024*100);
-    private final Logger logger = new Logger();;
+    private final BaseFS fs = new BaseFS(1024 * 1024 * 100);
+    private final Logger logger = new Logger();
+    ;
 
     public LogFS() {
         selfTest();
     }
 
-    public void selfTest(){
+    public void selfTest() {
         // Sprinkle some files around
         createFile("/Sample file.txt", "Hello there, feel free to look around.\n");
         createDirectory("/Sample directory");
@@ -185,12 +189,12 @@ public class LogFS extends FuseStubFS {
         createFile("/Directory with files/hello again.txt", "This another file with text in it! Oh my!\n");
         createDirectory("/Directory with files/Sample nested directory");
         createFile("/Directory with files/Sample nested directory/So deep.txt",
-                    "Man, I'm like, so deep in this here file structure.\n");
+            "Man, I'm like, so deep in this here file structure.\n");
     }
 
     @Override
     public int create(String path, @mode_t long mode, FuseFileInfo fi) {
-        logger.log("create, " + mountPoint + path);
+        logger.log("[INFO]: create, " + mountPoint + path);
         if (getPath(path) != null) {
             return -ErrorCodes.EEXIST();
         }
@@ -203,7 +207,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int getattr(String path, FileStat stat) {
-        logger.log("getattr, " + mountPoint + path);
+        logger.log("[INFO]: getattr, " + mountPoint + path);
         MemoryPath p = getPath(path);
         if (p != null) {
             p.getattr(stat);
@@ -212,7 +216,41 @@ public class LogFS extends FuseStubFS {
         return -ErrorCodes.ENOENT();
     }
 
-    private int createFile(String path, ByteBuffer data, Inode.Handler handler){
+    @Override
+    public int chmod(String path, @mode_t long mode) {
+        logger.log("[INFO]: chmod, " + mode);
+        // TODO
+        return 0;
+    }
+
+    @Override
+    public int chown(String path, @uid_t long uid, @gid_t long gid) {
+        logger.log("[INFO]: chown, " + uid + ", " + gid);
+        // TODO
+        return 0;
+    }
+    @Override
+    public int access(String path, int mask) {
+        logger.log("[INFO]: access, " + mask);
+        // TODO
+        return 0;
+    }
+
+    @Override
+    public int flush(String path, FuseFileInfo fi) {
+        logger.log("[INFO]: flush, " + path + ", " + fi);
+        // TODO
+        return 0;
+    }
+
+    @Override
+    public int utimens(String path, Timespec[] timespec) {
+        logger.log("[INFO]: utimens, " + path + ", " + timespec);
+        // TODO
+        return 0;
+    }
+
+    private int createFile(String path, ByteBuffer data, Inode.Handler handler) {
         int inode = fs.createInode(data, handler);
         MemoryDirectory parent = getParentPath(path);
         assert parent != null;
@@ -220,26 +258,26 @@ public class LogFS extends FuseStubFS {
         return inode;
     }
 
-    private int createFile(String path, String text){
+    private int createFile(String path, String text) {
         try {
-            return createFile(path, ByteBuffer.wrap(text.getBytes("UTF-8")), new Inode.SetMode(0777|FileStat.S_IFREG));
+            return createFile(path, ByteBuffer.wrap(text.getBytes("UTF-8")), new Inode.SetMode(0777 | FileStat.S_IFREG));
         } catch (UnsupportedEncodingException e) {
             return -1;
         }
     }
 
-    private int createDirectory(String path, long mode){
+    private int createDirectory(String path, long mode) {
         int inode = fs.createDirectory(mode);
         MemoryDirectory parent = getParentPath(path);
-        if (parent != null){
+        if (parent != null) {
             parent.add(getLastComponent(path), inode);
             return 0;
-        }else{
+        } else {
             return -ErrorCodes.ENOENT();
         }
     }
 
-    private void createDirectory(String path){
+    private void createDirectory(String path) {
         createDirectory(path, 0777);
     }
 
@@ -273,9 +311,9 @@ public class LogFS extends FuseStubFS {
         Inode inode = fs.inodeOf(path);
         if (inode == null)
             return null;
-        if ((inode.mode & FileStat.S_IFREG) != 0){
+        if ((inode.mode & FileStat.S_IFREG) != 0) {
             return new MemoryFile(path);
-        }else if((inode.mode & FileStat.S_IFDIR) != 0){
+        } else if ((inode.mode & FileStat.S_IFDIR) != 0) {
             return new MemoryDirectory(path);
         }
         return null;
@@ -284,7 +322,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int mkdir(String path, @mode_t long mode) {
-        logger.log("mkdir, " + mountPoint + path);
+        logger.log("[INFO]: mkdir, " + mountPoint + path);
         if (getPath(path) != null) {
             return -ErrorCodes.EEXIST();
         }
@@ -294,7 +332,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int read(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
-        logger.log("read, "  + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
+        logger.log("[INFO]: read, " + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -307,8 +345,8 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int readdir(String path, Pointer buf, FuseFillDir filter, @off_t long offset, FuseFileInfo fi) {
-        logger.log("readdir, "  + mountPoint + path + ", " + buf + ", " + offset);
-        System.out.println("readdir: " + path + " " + Long.toString(offset));
+        logger.log("[INFO]: readdir, " + mountPoint + path + ", " + buf + ", " + offset);
+//        System.out.println("readdir: " + path + " " + Long.toString(offset));
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -325,7 +363,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int statfs(String path, Statvfs stbuf) {
-        logger.log("statfs, " + mountPoint + path);
+        logger.log("[INFO]: statfs, " + mountPoint + path);
         if (Platform.getNativePlatform().getOS() == WINDOWS) {
             // statfs needs to be implemented on Windows in order to allow for copying
             // data from other devices because winfsp calculates the volume size based
@@ -342,7 +380,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int rename(String path, String newName) {
-        logger.log("rename, " + mountPoint + path);
+        logger.log("[INFO]: rename, " + mountPoint + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -358,7 +396,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int rmdir(String path) {
-        logger.log("rmdir, " + mountPoint + path);
+        logger.log("[INFO]: rmdir, " + mountPoint + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -372,7 +410,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int truncate(String path, long offset) {
-        logger.log("truncate, " + mountPoint + path + ", " + offset);
+        logger.log("[INFO]: truncate, " + mountPoint + path + ", " + offset);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -386,7 +424,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int unlink(String path) {
-        logger.log("unlink, " + mountPoint + path);
+        logger.log("[INFO]: unlink, " + mountPoint + path);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
@@ -397,14 +435,14 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int link(String oldpath, String newpath) {
-        logger.log("link, " + mountPoint + oldpath + ", " + mountPoint + newpath);
+        logger.log("[INFO]: link, " + mountPoint + oldpath + ", " + mountPoint + newpath);
         //TODO: implement hard links
         return super.link(oldpath, newpath);
     }
 
     @Override
     public int open(String path, FuseFileInfo fi) {
-        logger.log("open, " + mountPoint + path);
+        logger.log("[INFO]: open, " + mountPoint + path);
 //        MemoryPath p = getPath(path);
 //        if (p == null) {
 //            return -ErrorCodes.ENOENT();
@@ -414,7 +452,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int write(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
-        logger.log("write, "  + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
+        logger.log("[INFO]: write, " + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
         MemoryPath p = getPath(path);
         if (p == null) {
             return -ErrorCodes.ENOENT();
