@@ -21,6 +21,11 @@ application {
 //    mainClass = 'ru.serce.jnrfuse.examples.MemoryFS'
 }
 
+tasks.withType(JavaExec) {
+    if (System.getProperty('DEBUG', 'false') == 'true') {
+        jvmArgs '-Xdebug', '-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=5005'
+    }
+}
 
 //plugins {
 //    id 'java'
