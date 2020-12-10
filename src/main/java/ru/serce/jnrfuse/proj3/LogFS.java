@@ -3,15 +3,15 @@ package ru.serce.jnrfuse.proj3;
 
 import jnr.ffi.Platform;
 import jnr.ffi.Pointer;
+import jnr.ffi.Struct;
 import jnr.ffi.types.*;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.NotImplemented;
-import ru.serce.jnrfuse.struct.FileStat;
-import ru.serce.jnrfuse.struct.FuseFileInfo;
-import ru.serce.jnrfuse.struct.Statvfs;
-import ru.serce.jnrfuse.struct.Timespec;
+import ru.serce.jnrfuse.flags.AccessConstants;
+import ru.serce.jnrfuse.struct.*;
+import ru.serce.jnrfuse.flags.AccessConstants.*;
 
 import java.io.FileNotFoundException;
 import java.io.UnsupportedEncodingException;
@@ -192,64 +192,6 @@ public class LogFS extends FuseStubFS {
             "Man, I'm like, so deep in this here file structure.\n");
     }
 
-    @Override
-    public int create(String path, @mode_t long mode, FuseFileInfo fi) {
-        logger.log("[INFO]: create, " + mountPoint + path);
-        if (getPath(path) != null) {
-            return -ErrorCodes.EEXIST();
-        }
-        if (createFile(path, "") != -1)
-            return 0;
-        else
-            return -ErrorCodes.ENOENT();
-    }
-
-
-    @Override
-    public int getattr(String path, FileStat stat) {
-        logger.log("[INFO]: getattr, " + mountPoint + path);
-        MemoryPath p = getPath(path);
-        if (p != null) {
-            p.getattr(stat);
-            return 0;
-        }
-        return -ErrorCodes.ENOENT();
-    }
-
-    @Override
-    public int chmod(String path, @mode_t long mode) {
-        logger.log("[INFO]: chmod, " + mode);
-        // TODO
-        return 0;
-    }
-
-    @Override
-    public int chown(String path, @uid_t long uid, @gid_t long gid) {
-        logger.log("[INFO]: chown, " + uid + ", " + gid);
-        // TODO
-        return 0;
-    }
-    @Override
-    public int access(String path, int mask) {
-        logger.log("[INFO]: access, " + mask);
-        // TODO
-        return 0;
-    }
-
-    @Override
-    public int flush(String path, FuseFileInfo fi) {
-        logger.log("[INFO]: flush, " + path + ", " + fi);
-        // TODO
-        return 0;
-    }
-
-    @Override
-    public int utimens(String path, Timespec[] timespec) {
-        logger.log("[INFO]: utimens, " + path + ", " + timespec);
-        // TODO
-        return 0;
-    }
-
     private int createFile(String path, ByteBuffer data, Inode.Handler handler) {
         int inode = fs.createInode(data, handler);
         MemoryDirectory parent = getParentPath(path);
@@ -319,6 +261,89 @@ public class LogFS extends FuseStubFS {
         return null;
     }
 
+    @Override
+    public int create(String path, @mode_t long mode, FuseFileInfo fi) {
+        logger.log("[INFO]: create, " + mountPoint + path);
+        if (getPath(path) != null) {
+            return -ErrorCodes.EEXIST();
+        }
+        if (createFile(path, "") != -1)
+            return 0;
+        else
+            return -ErrorCodes.ENOENT();
+    }
+
+
+    @Override
+    public int getattr(String path, FileStat stat) {
+        logger.log("[INFO]: getattr, " + mountPoint + path);
+        MemoryPath p = getPath(path);
+        if (p != null) {
+            p.getattr(stat);
+            return 0;
+        }
+        return -ErrorCodes.ENOENT();
+    }
+
+    @Override
+    public int chmod(String path, @mode_t long mode) {
+        logger.log("[INFO]: chmod, " + mode);
+        Inode inode = fs.inodeOf(path);
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        inode.mode = mode;
+        fs.update(inode.id, inode);
+        return 0;
+    }
+
+    @Override
+    public int chown(String path, @uid_t long uid, @gid_t long gid) {
+        logger.log("[INFO]: chown, " + uid + ", " + gid);
+        Inode inode = fs.inodeOf(path);
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        inode.gid = (int)gid;
+        inode.uid = (int)uid;
+        fs.update(inode.id, inode);
+        return 0;
+    }
+    @Override
+    public int access(String path, int mask) {
+        logger.log("[INFO]: access, " + mask);
+//        System.out.println(AccessConstants.F_OK + ", " + AccessConstants.R_OK + ", " + AccessConstants.W_OK + ", " + AccessConstants.X_OK);
+        Inode inode = fs.inodeOf(path);
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        FuseContext context = getContext();
+        int flag = 0;
+        if (context.uid.intValue() == inode.uid) {
+            flag |= (inode.mode >> 6) & 0x7;
+        }
+        if (context.gid.intValue() == inode.gid) {
+            flag |= (inode.mode >> 3) & 0x7;
+        }
+        flag |= (inode.mode) & 0x7;
+        if ((flag & mask) != mask)
+            return -ErrorCodes.EACCES();
+        return 0;
+    }
+
+    @Override
+    public int flush(String path, FuseFileInfo fi) {
+        logger.log("[INFO]: flush, " + path + ", " + fi);
+        // TODO
+        return 0;
+    }
+
+    @Override
+    public int utimens(String path, Timespec[] timespec) {
+        logger.log("[INFO]: utimens, " + path + ", " + timespec);
+        // TODO
+        return 0;
+    }
 
     @Override
     public int mkdir(String path, @mode_t long mode) {
