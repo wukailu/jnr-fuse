@@ -3,15 +3,15 @@ package ru.serce.jnrfuse.proj3;
 
 import jnr.ffi.Platform;
 import jnr.ffi.Pointer;
+import jnr.ffi.Struct;
 import jnr.ffi.types.*;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.NotImplemented;
-import ru.serce.jnrfuse.struct.FileStat;
-import ru.serce.jnrfuse.struct.FuseFileInfo;
-import ru.serce.jnrfuse.struct.Statvfs;
-import ru.serce.jnrfuse.struct.Timespec;
+import ru.serce.jnrfuse.flags.AccessConstants;
+import ru.serce.jnrfuse.struct.*;
+import ru.serce.jnrfuse.flags.AccessConstants.*;
 
 import java.io.FileNotFoundException;
 import java.io.UnsupportedEncodingException;
@@ -51,9 +51,7 @@ public class LogFS extends FuseStubFS {
         // TODO: fix the permission later
         @Override
         protected void getattr(FileStat stat) {
-            stat.st_mode.set(fs.inodeOf(id).mode);
-            stat.st_uid.set(getContext().uid.get());
-            stat.st_gid.set(getContext().gid.get());
+            getattrCommon(stat);
         }
 
         public void read(Pointer buf, FuseFillDir filler) {
@@ -97,10 +95,8 @@ public class LogFS extends FuseStubFS {
 
         @Override
         protected void getattr(FileStat stat) {
-            stat.st_mode.set(fs.inodeOf(id).mode);
-            stat.st_size.set(fs.inodeOf(path).size);
-            stat.st_uid.set(getContext().uid.get());
-            stat.st_gid.set(getContext().gid.get());
+            getattrCommon(stat);
+            stat.st_size.set(inode.size);
         }
 
         private int read(Pointer buffer, long size, long offset) {
@@ -134,12 +130,15 @@ public class LogFS extends FuseStubFS {
         protected String name;
         protected String path;
         protected int id;
+        protected Inode inode;
 
         private MemoryPath(String path) {
             this.path = path;
             this.name = getLastComponent(path);
             this.id = fs.inodeNumberOf(path);
             assert this.id != -1;
+            this.inode = fs.inodeOf(this.id);
+            assert this.inode != null;
         }
 
         private synchronized void delete() {
@@ -150,6 +149,15 @@ public class LogFS extends FuseStubFS {
 
         private boolean isDiretory() {
             return (fs.inodeOf(id).mode & FileStat.S_IFDIR) != 0;
+        }
+
+        protected void getattrCommon(FileStat stat) {
+            stat.st_mode.set(inode.mode);
+            stat.st_uid.set(inode.uid);
+            stat.st_gid.set(inode.gid);
+            stat.st_ctim.tv_nsec.set(inode.lastChangeTime);
+            stat.st_atim.tv_nsec.set(inode.lastAccessTime);
+            stat.st_mtim.tv_nsec.set(inode.lastModifyTime);
         }
 
         protected abstract void getattr(FileStat stat);
@@ -261,18 +269,6 @@ public class LogFS extends FuseStubFS {
             "Man, I'm like, so deep in this here file structure.\n");
     }
 
-    @Override
-    public int create(String path, @mode_t long mode, FuseFileInfo fi) {
-        logger.log("[INFO]: create, " + mountPoint + path);
-        if (getPath(path) != null) {
-            return -ErrorCodes.EEXIST();
-        }
-        if (createFile(path, "") != -1)
-            return 0;
-        else
-            return -ErrorCodes.ENOENT();
-    }
-
 
     @Override
     public int getattr(String path, FileStat stat) {
@@ -287,37 +283,82 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int chmod(String path, @mode_t long mode) {
-        logger.log("[INFO]: chmod, " + mode);
-        // TODO
+        logger.log("[INFO]: chmod, " + path + ", " + mode);
+        Inode inode = fs.inodeOf(path);
+        // FIXME: check the privilege
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        inode.mode = mode;
+        fs.update(inode.id, inode);
         return 0;
     }
 
     @Override
     public int chown(String path, @uid_t long uid, @gid_t long gid) {
-        logger.log("[INFO]: chown, " + uid + ", " + gid);
-        // TODO
-        return 0;
-    }
-
-    @Override
-    public int access(String path, int mask) {
-        logger.log("[INFO]: access, " + mask);
-        // TODO
-        return 0;
-    }
-
-    @Override
-    public int flush(String path, FuseFileInfo fi) {
-        logger.log("[INFO]: flush, " + path + ", " + fi);
-        // TODO
+        logger.log("[INFO]: chown, " + path + ", " + uid + ", " + gid);
+        Inode inode = fs.inodeOf(path);
+        // FIXME: check the privilege
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        if ((int) uid != -1) {
+            inode.uid = (int) uid;
+        }
+        if ((int) gid != -1) {
+            inode.gid = (int) gid;
+        }
+        fs.update(inode.id, inode);
         return 0;
     }
 
     @Override
     public int utimens(String path, Timespec[] timespec) {
         logger.log("[INFO]: utimens, " + path + ", " + timespec);
-        // TODO
+        assert timespec.length == 2 : "the length of argument timespec is not 2.";
+        Inode inode = fs.inodeOf(path);
+        // FIXME: check the privilege
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        inode.lastAccessTime = timespec[0].tv_nsec.longValue();
+        inode.lastModifyTime = timespec[1].tv_nsec.longValue();
         return 0;
+    }
+
+    @Override
+    public int access(String path, int mask) {
+        logger.log("[INFO]: access, " + path + ", " + mask);
+//        System.out.println(AccessConstants.F_OK + ", " + AccessConstants.R_OK + ", " + AccessConstants.W_OK + ", " + AccessConstants.X_OK);
+        Inode inode = fs.inodeOf(path);
+        // FIXME: check the privilege of the parents
+        if (inode == null) {
+            return -ErrorCodes.ENOENT();
+        }
+        FuseContext context = getContext();
+        int flag = 0;
+        if (context.uid.intValue() == inode.uid) {
+            flag |= (inode.mode >> 6) & 0x7;
+        }
+        if (context.gid.intValue() == inode.gid) {
+            flag |= (inode.mode >> 3) & 0x7;
+        }
+        flag |= (inode.mode) & 0x7;
+        if ((flag & mask) != mask)
+            return -ErrorCodes.EACCES();
+        return 0;
+    }
+
+    @Override
+    public int create(String path, @mode_t long mode, FuseFileInfo fi) {
+        logger.log("[INFO]: create, " + mountPoint + path);
+        if (getPath(path) != null) {
+            return -ErrorCodes.EEXIST();
+        }
+        if (createFile(path, "") != -1)
+            return 0;
+        else
+            return -ErrorCodes.ENOENT();
     }
 
     @Override
@@ -441,6 +482,7 @@ public class LogFS extends FuseStubFS {
     public int open(String path, FuseFileInfo fi) {
         // TODO: fix bug here, -o means clear all things
         logger.log("[INFO]: open, " + mountPoint + path);
+        // TODO
 //        MemoryPath p = getPath(path);
 //        if (p == null) {
 //            return -ErrorCodes.ENOENT();
@@ -459,5 +501,12 @@ public class LogFS extends FuseStubFS {
             return -ErrorCodes.EISDIR();
         }
         return ((MemoryFile) p).write(buf, size, offset);
+    }
+
+    @Override
+    public int flush(String path, FuseFileInfo fi) {
+        logger.log("[INFO]: flush, " + path + ", " + fi);
+        // TODO: this function is for Yan Lao Ge
+        return 0;
     }
 }
