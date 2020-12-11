@@ -1,7 +1,10 @@
 package ru.serce.jnrfuse.proj3;
 
+import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.struct.FileStat;
+import ru.serce.jnrfuse.struct.FuseContext;
 
+import javax.jnlp.FileContents;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
@@ -124,23 +127,41 @@ public class BaseFS {
      * @param path  The path, in Linux form.
      * @return  The inode number of this. -1 for invalid path.
      */
-    public int inodeNumberOf(String path){
+
+    public int inodeNumberOf(String path) {
+        return inodeNumberOf(path, 0x000, null);
+    }
+
+    private boolean checkPrivilege(Inode inode, int mask, FuseContext context) {
+        int flag = (int) (inode.mode & 0x7);
+        if (context != null) {
+            if (context.uid.intValue() == inode.uid)
+                flag |= (inode.mode >> 6) & 0x7;
+            if (context.gid.intValue() == inode.gid)
+                flag |= (inode.mode >> 3) & 0x7;
+        }
+        return (flag & mask) == mask;
+    }
+
+    public int inodeNumberOf(String path, int mask, FuseContext context) {
         if (path.startsWith("/"))
             path = path.substring(1);
         if (path.equals(""))
             return 1;
         String[] pathList = path.split("/");
         int currentInode = 1;
-        for (String s: pathList){
+        for (String s: pathList) {
             Inode inode = inodeOf(currentInode);
-            if ((inode.mode & FileStat.S_IFDIR) == 0){
-                return -1;
+            if ((inode.mode & FileStat.S_IFDIR) == 0) {
+                return -ErrorCodes.ENOENT();
             }
-            //TODO: check permission here
+            if (!checkPrivilege(inode, mask, context)) {
+                return -ErrorCodes.EACCES();
+            }
             DirectoryBlock directory = new DirectoryBlock().parse(inode.read(mem, 0, 1024), 0, 1024);
             Object ret = directory.contents.get(s);
             if(ret == null)
-                return -1;
+                return -ErrorCodes.ENOENT();
             currentInode = (int) ret;
         }
         return currentInode;
