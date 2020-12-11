@@ -215,14 +215,37 @@ public class Inode extends writableObject<Inode> {
         }
     }
 
+    public static Handler Identity = new IdentityHandler();
 
     public abstract static class Handler{
         abstract Inode process(Inode inode);
     }
 
-    public static class SetMode extends Handler{
+    public static Handler Sequential(Handler... handlers){
+        return new SequentialHandler(handlers);
+    }
+
+    public static Handler SetMode(int mode){
+        return new SetModeHandler(mode);
+    }
+
+    public static class SequentialHandler extends Handler{
+        private final Handler[] handlers;
+        SequentialHandler(Handler... handlers){
+            this.handlers = handlers;
+        }
+
+        @Override
+        Inode process(Inode inode) {
+            for(Handler handler: handlers)
+                inode = handler.process(inode);
+            return inode;
+        }
+    }
+
+    public static class SetModeHandler extends Handler{
         private final int mode;
-        SetMode(int mode){
+        SetModeHandler(int mode){
             this.mode = mode;
         }
 
@@ -233,26 +256,9 @@ public class Inode extends writableObject<Inode> {
         }
     }
 
-    public static class Identity extends Handler{
-        Identity(){
-        }
-
+    public static class IdentityHandler extends Handler{
         @Override
         Inode process(Inode inode) {
-            return inode;
-        }
-    }
-
-    public static class SetAll extends Handler{
-        private Handler[] handlers;
-        SetAll(Handler... handlers){
-            this.handlers = handlers;
-        }
-
-        @Override
-        Inode process(Inode inode) {
-            for(Handler handler: handlers)
-                inode = handler.process(inode);
             return inode;
         }
     }
