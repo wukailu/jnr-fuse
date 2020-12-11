@@ -217,6 +217,8 @@ public class LogFS extends FuseStubFS {
         update(node);
     }
 
+    //------
+
     private class MemoryDirectory extends MemoryFile {
         private DirectoryBlock data;
         /***
@@ -332,7 +334,7 @@ public class LogFS extends FuseStubFS {
         }
 
         protected synchronized void truncate(long size) {
-            // TODO: Bug fix here
+            // TODO: Bug fix here for kailu
             if (size < inode.size) {
                 inode.updateSize((int) size);
             }
