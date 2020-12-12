@@ -193,7 +193,7 @@ public class Inode extends writableObject<Inode> {
                         mem.position(mark).mark();
                     }
                     indirectBlock.write(data, mem, startAddress, len);
-                    len -= Math.min(len, 1024 * 256 - startAddress);
+                    len -= Math.min(len, 1024 * 256 * 256 - startAddress);
                     startAddress = 0;
                     mem.reset();
                     lv2Block[i] = mem.position();
