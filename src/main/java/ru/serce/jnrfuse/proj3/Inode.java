@@ -105,24 +105,20 @@ public class Inode extends writableObject<Inode> {
             startAddress -= dataBlocks.length * 1024;
         }
 
-        for (int lv1: lv1Block){
-            if(lv1 != 0 && len > 0){
-                if (startAddress < 1024 * 256){
-                    ByteBuffer data = new LV1IndirectBlock().parse(mem, lv1, 1024).read(mem, startAddress, len);
-                    len -= data.capacity();
-                    startAddress = 0;
-                    ret.put(data);
-                }else {
-                    startAddress -= 1024 * 256;
-                }
-            }
+        if (startAddress < lv1Block.length * 1024 * 256){
+            ByteBuffer data = LV2IndirectBlock.readLv1Blocks(mem, startAddress, len, lv1Block);
+            len -= data.remaining();
+            startAddress = 0;
+            ret.put(data);
+        }else{
+            startAddress -= lv1Block.length * 1024 * 256;
         }
 
         for (int lv2: lv2Block){
             if(lv2 != 0 && len > 0){
                 if (startAddress < 1024 * 256 * 256){
                     ByteBuffer data = new LV2IndirectBlock().parse(mem, lv2, 1024).read(mem, startAddress, len);
-                    len -= data.capacity();
+                    len -= data.remaining();
                     startAddress = 0;
                     ret.put(data);
                 }else {
@@ -159,27 +155,12 @@ public class Inode extends writableObject<Inode> {
             startAddress -= dataBlocks.length * 1024;
         }
 
-        for (int i = 0; i < lv1Block.length; i++) {
-            int lv1 = lv1Block[i];
-            if(len > 0){
-                if (startAddress < 1024 * 256){
-                    LV1IndirectBlock indirectBlock = new LV1IndirectBlock();
-                    if (lv1 != 0){
-                        int mark = mem.reset().position();
-                        indirectBlock.parse(mem, lv1, 1024);
-                        mem.position(mark).mark();
-                    }
-                    indirectBlock.write(data, mem, startAddress, len);
-                    len -= Math.min(len, 1024 * 256 - startAddress);
-                    startAddress = 0;
-                    mem.reset();
-                    lv1Block[i] = mem.position();
-                    indirectBlock.flush(mem, mem.position());
-                    mem.mark();
-                }else {
-                    startAddress -= 1024 * 256;
-                }
-            }
+        if (startAddress < lv1Block.length * 1024 * 256){
+            LV2IndirectBlock.writeLv1Blocks(data, mem, startAddress, len, lv1Block);
+            len -= Math.min(len, lv1Block.length * 1024 * 256 - startAddress);
+            startAddress = 0;
+        }else{
+            startAddress -= lv1Block.length * 1024 * 256;
         }
 
         for (int i = 0; i < lv2Block.length; i++){
