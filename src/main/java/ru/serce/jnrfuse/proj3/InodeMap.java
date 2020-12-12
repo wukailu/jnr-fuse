@@ -13,6 +13,11 @@ public class InodeMap extends writableObject<InodeMap>{
         preInodeMapAddress = -1;
     }
 
+    public int size()
+    {
+        return inodeMap.size();
+    }
+
     @Override
     public int flush(ByteBuffer mem, int startAddress) {
         mem.position(startAddress);

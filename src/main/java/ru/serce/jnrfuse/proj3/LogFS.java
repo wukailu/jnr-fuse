@@ -12,8 +12,9 @@ import ru.serce.jnrfuse.struct.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+
+import java.io.*;
 
 import static jnr.ffi.Platform.OS.WINDOWS;
 
@@ -34,7 +35,6 @@ public class LogFS extends FuseStubFS {
     // Load from existing mem
     LogFS(ByteBuffer mem){
         this.mem = mem;
-        mark(1024);
         this.total_size = mem.capacity();
         checkpoint1 = new Checkpoint();
         checkpoint2 = new Checkpoint();
@@ -44,15 +44,22 @@ public class LogFS extends FuseStubFS {
             checkpoint = checkpoint1;
         else
             checkpoint = checkpoint2;
+        mark(checkpoint.lastInodeMap + 1024);
         oldInodeMap = new HashMap<Integer, Integer>();
         newInodeMap = new HashMap<Integer, Integer>();
         inodeCnt = 0;
         int lastInodeMap = checkpoint.lastInodeMap;
+        System.out.println(total_size);
+        System.out.println(lastInodeMap);
+        List<InodeMap> f = new ArrayList<>();
         while (lastInodeMap > 0){
             InodeMap inodeMap = new InodeMap().parse(mem, lastInodeMap, 1024);
-            oldInodeMap.putAll(inodeMap.inodeMap);
+            f.add(inodeMap);
             lastInodeMap = inodeMap.preInodeMapAddress;
         }
+        Collections.reverse(f);
+        for(InodeMap m: f)
+            oldInodeMap.putAll(m.inodeMap);
         for(int i: oldInodeMap.values())
             inodeCnt = Math.max(inodeCnt, i);
         if (inodeCnt == 0){ // create "/"
@@ -67,6 +74,97 @@ public class LogFS extends FuseStubFS {
     private void mark(int newMark){
         mark = newMark;
         mem.position(newMark).mark();
+    }
+
+    private static ByteBuffer readFromDisk(String s)
+    {
+        File file = new File(s);
+        if (!file.exists())
+        {
+            try {
+                file.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        byte[] x = new byte[1024*1024*100];
+        try {
+            FileInputStream in = new FileInputStream(file);
+            try {
+                in.read(x,0,1024*1024*100);
+                in.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        ByteBuffer y = ByteBuffer.wrap(x);
+        return y;
+    }
+
+    private int updateInodeMap()
+    {
+        int p = checkpoint.lastInodeMap, q = p + 1024;
+        InodeMap m = new InodeMap();
+        m.preInodeMapAddress = p;
+        reset();
+        for (Map.Entry<Integer, Integer> e : newInodeMap.entrySet())
+        {
+            m.inodeMap.put(e.getKey(), e.getValue());
+            if (m.size() == 127)
+            {
+                p = mem.position();
+                m.flush(mem, p);
+                m = new InodeMap();
+                m.preInodeMapAddress = p;
+            }
+        }
+        if (m.size() > 0)
+        {
+            p = mem.position();
+            m.flush(mem, p);
+        }
+        mark(mem.position());
+        oldInodeMap.putAll(newInodeMap);
+        newInodeMap = new HashMap<Integer, Integer>();
+        checkpoint.update(p);
+        checkpoint.flush(mem, total_size-2048);
+        checkpoint.flush(mem, total_size-1024);
+        System.out.println(checkpoint.lastInodeMap);
+        return q;
+    }
+
+    private void writeToDisk(String s)
+    {
+        int p = updateInodeMap();
+        File file = new File(s);
+        if (!file.exists())
+        {
+            try {
+                file.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        byte[] x = new byte[total_size];
+        mem.position(0);
+        mem.get(x);
+        try {
+            RandomAccessFile out = new RandomAccessFile(file, "rw");
+            try {
+                out.seek(p);
+                out.write(x,p,mark-p);
+                out.seek(total_size-2048);
+                out.write(x,total_size-2048,2048);
+                //out.write(x,0,1024*1024*100);
+                out.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
     }
 
     /***
@@ -382,8 +480,11 @@ public class LogFS extends FuseStubFS {
     private final Logger logger = new Logger();
 
     public static void main(String[] args) {
-        LogFS memfs = new LogFS(1024 * 1024 * 100);
-        memfs.selfTest();
+        ByteBuffer x = readFromDisk("LFS");
+        LogFS memfs = new LogFS(x);
+        //memfs.selfTest();
+        //memfs.selfTest2();
+        memfs.writeToDisk("LFS");
         try {
             String path;
             if (Platform.getNativePlatform().getOS() == WINDOWS) {
@@ -427,6 +528,17 @@ public class LogFS extends FuseStubFS {
                 "Man, I'm like, so deep in this here file structure.\n");
         } catch (Exception e){
             logger.log("Self Test Failed!!!");
+            logger.log(e.toString());
+        }
+
+    }
+
+    public void selfTest2() {
+        Tester tester = new Tester();
+        try{
+            tester.createFile("/a.txt", "Hello.\n");
+        } catch (Exception e){
+            logger.log("Self Test 2 Failed!!!");
             logger.log(e.toString());
         }
 
