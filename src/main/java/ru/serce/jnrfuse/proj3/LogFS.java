@@ -1,8 +1,10 @@
 package ru.serce.jnrfuse.proj3;
 
 
+import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Platform;
 import jnr.ffi.Pointer;
+import jnr.ffi.Struct;
 import jnr.ffi.types.*;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
@@ -338,10 +340,12 @@ public class LogFS extends FuseStubFS {
             data = getDirectory(inode);
         }
 
-        protected void read(Pointer buf, FuseFillDir filler) throws Exception {
+        protected int read(Pointer buf, FuseFillDir filler) throws Exception {
+            int ret = 0;
             for (String p : data.contents.keySet()) {
-                filler.apply(buf, p, null, 0);
+                ret += filler.apply(buf, p, null, 0);
             }
+            return ret;
         }
 
         protected void rename(String oldChildName, String newChildName){
@@ -432,12 +436,13 @@ public class LogFS extends FuseStubFS {
             return checkPrivilege(inode, mask);
         }
 
-        protected void read(Pointer buffer, long size, long offset) {
+        protected int read(Pointer buffer, long size, long offset) {
             int bytesToRead = (int) Math.min(inode.size - offset, size);
             byte[] bytesRead = inode.read(mem, (int) offset, bytesToRead).array();
             synchronized (this) {
                 buffer.put(0, bytesRead, 0, bytesToRead);
             }
+            return bytesToRead;
         }
 
         protected synchronized void truncate(int size) {
@@ -447,12 +452,13 @@ public class LogFS extends FuseStubFS {
             }
         }
 
-        protected void write(Pointer buffer, long bufSize, long writeOffset) {
+        protected int write(Pointer buffer, long bufSize, long writeOffset) {
             byte[] bytesToWrite = new byte[(int) bufSize];
             synchronized (this) {
-                buffer.get(writeOffset, bytesToWrite, 0, (int) bufSize);
-                LogFS.this.write(inode, ByteBuffer.wrap(bytesToWrite), (int) 0, (int) bufSize);
+                buffer.get(0, bytesToWrite, 0, (int) bufSize);
+                LogFS.this.write(inode, ByteBuffer.wrap(bytesToWrite), (int) writeOffset, (int) bufSize);
             }
+            return (int) bufSize;
         }
 
         protected void flush(){
@@ -492,8 +498,8 @@ public class LogFS extends FuseStubFS {
     public static void main(String[] args) {
         ByteBuffer x = readFromDisk("LFS");
         LogFS memfs = new LogFS(x);
-        //memfs.selfTest();
-        //memfs.selfTest2();
+//        memfs.selfTest();
+//        memfs.selfTest2();
         memfs.writeToDisk("LFS");
         try {
             String path;
@@ -694,9 +700,9 @@ public class LogFS extends FuseStubFS {
             if (p.isDiretory()) {
                 return -ErrorCodes.EISDIR();
             }
-            p.read(buf, size, offset);
+            int ret = p.read(buf, size, offset);
             p.flush();
-            return 0;
+            return ret;
         }catch (Exception e){
             return Integer.parseInt(e.getMessage());
         }
@@ -709,10 +715,13 @@ public class LogFS extends FuseStubFS {
             MemoryDirectory p = new MemoryDirectory(path);
             if (!p.access(AccessConstants.R_OK))
                 return -ErrorCodes.EACCES();
-            filter.apply(buf, ".", null, 0);
-            filter.apply(buf, "..", null, 0);
-            p.read(buf, filter);
+            int ret = 0;
+            ret += filter.apply(buf, ".", null, 0);
+            ret += filter.apply(buf, "..", null, 0);
+            ret += p.read(buf, filter);
             p.flush();
+            if (ret != 0)
+                return -ErrorCodes.EFBIG();
             return 0;
         }catch (Exception e){
             return Integer.parseInt(e.getMessage());
@@ -815,9 +824,40 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int open(String path, FuseFileInfo fi) {
-        // TODO: fix bug here, -o means clear all things
         logger.log("[INFO]: open, " + mountPoint + path);
-        // TODO: Implement this
+        try{
+            if ((fi.flags.intValue() & OpenFlags.O_TRUNC.intValue()) != 0){
+                int ret = truncate(path, 0);
+                if (ret != 0)
+                    return ret;
+            }
+            MemoryFile p = new MemoryFile(path);
+            if (p.isDiretory()) {
+                return -ErrorCodes.EISDIR();
+            }
+            fi.fh.set(p.id);
+            p.flush();
+            return 0;
+        }catch (Exception e){
+            int error = Integer.parseInt(e.getMessage());
+            if (error == ErrorCodes.ENOENT() && (fi.flags.intValue() & OpenFlags.O_CREAT.intValue()) != 0){
+                int ret = create(path, 0644, fi);
+                if (ret != 0)
+                    return ret;
+                try{
+                    MemoryFile p = new MemoryFile(path);
+                    if (p.isDiretory()) {
+                        return -ErrorCodes.EISDIR();
+                    }
+                    fi.fh.set(p.id);
+                    p.flush();
+                }catch (Exception e2){
+                    return Integer.parseInt(e2.getMessage());
+                }
+            }else{
+                return Integer.parseInt(e.getMessage());
+            }
+        }
         return 0;
     }
 
@@ -831,9 +871,9 @@ public class LogFS extends FuseStubFS {
             if (p.isDiretory()) {
                 return -ErrorCodes.EISDIR();
             }
-            p.write(buf, size, offset);
+            int ret = p.write(buf, size, offset);
             p.flush();
-            return 0;
+            return ret;
         }catch (Exception e){
             return Integer.parseInt(e.getMessage());
         }

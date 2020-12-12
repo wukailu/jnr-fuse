@@ -143,10 +143,13 @@ public class Inode extends writableObject<Inode> {
      * @param len   The size of bytes to write, started from data.position().
      */
     public void write(ByteBuffer data, ByteBuffer mem, int startAddress, int len){
-        assert len > 0;
-        assert startAddress < size;
+        if (startAddress > size){ // pad 0
+            write(ByteBuffer.allocate(startAddress-size), mem, size, startAddress-size);
+        }else{
+            mem.reset();
+        }
+
         updateSize(Math.max(size, startAddress + len));
-        mem.reset();
 
         if (startAddress < dataBlocks.length * 1024){
             LV1IndirectBlock.writeBlocks(data, mem, startAddress, len, dataBlocks);
