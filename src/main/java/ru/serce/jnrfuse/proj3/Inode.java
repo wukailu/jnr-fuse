@@ -229,6 +229,10 @@ public class Inode extends writableObject<Inode> {
         return new SetModeHandler(mode);
     }
 
+    public static Handler SetOwner(int uid, int gid){
+        return new SetOwnerHandler(uid, gid);
+    }
+
     public static class SequentialHandler extends Handler{
         private final Handler[] handlers;
         SequentialHandler(Handler... handlers){
@@ -252,6 +256,21 @@ public class Inode extends writableObject<Inode> {
         @Override
         Inode process(Inode inode) {
             inode.mode = mode;
+            return inode;
+        }
+    }
+
+    public static class SetOwnerHandler extends Handler{
+        private final int uid, gid;
+        SetOwnerHandler(int uid, int gid){
+            this.uid = uid;
+            this.gid = gid;
+        }
+
+        @Override
+        Inode process(Inode inode) {
+            inode.uid = uid;
+            inode.gid = gid;
             return inode;
         }
     }
