@@ -12,13 +12,12 @@
 * open after read
 
 ### Known bugs
-* `rename()` is not correct: 
-    * `mv a b`: the file will disapper
-* `ACCESS` not implemented
-* uid, gid should be long according to `chown()`.
-* privilege check for a path
+* `cat {file}` no output.
+* `mkdir`, `echo 1 > a` user and group is incorrect.
 
 ### Questions
+* how the fuse query the content of a directory?
+
 * what should happen when calling `sync`?
 * one user can belong to multiple group (use `id` to see), but there is only one gid in FuseContext.?
 

@@ -7,6 +7,7 @@ import jnr.ffi.types.*;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.FuseStubFS;
+import ru.serce.jnrfuse.flags.AccessConstants;
 import ru.serce.jnrfuse.struct.*;
 
 import java.nio.ByteBuffer;
@@ -91,7 +92,11 @@ public class LogFS extends FuseStubFS {
     private Inode createInode(ByteBuffer dataBuffer, Inode.Handler handler){
         int inodeNumber = ++inodeCnt;
         Inode newInode = new Inode(inodeNumber);
-        newInode = handler.process(newInode);
+        Inode.Handler newHandler = Inode.Sequential(
+            handler,
+            Inode.SetOwner(getContext().uid.intValue(), getContext().gid.intValue())
+        );
+        newInode = newHandler.process(handler.process(newInode));
         write(newInode, dataBuffer, 0, dataBuffer.remaining());
         update(newInode);
         return newInode;
@@ -129,8 +134,9 @@ public class LogFS extends FuseStubFS {
     }
 
 //  TODO: Add Notes.
-    private boolean checkPrivilege(Inode inode, int mask, FuseContext context) {
+    private boolean checkPrivilege(Inode inode, int mask) {
         int flag = (int) (inode.mode & 0x7);
+        FuseContext context = getContext();
         if (context != null) {
             if (context.uid.intValue() == inode.uid)
                 flag |= (inode.mode >> 6) & 0x7;
@@ -143,10 +149,9 @@ public class LogFS extends FuseStubFS {
     /***
      * The inode number of a file or directory.
      * @param path  The path, in Linux form.
-     * @param mask  The permission needed for this access
      * @return  The inode number of this. -1 for invalid path.
      */
-    private Inode inodeOf(String path, int mask) throws Exception {
+    private Inode inodeOf(String path) throws Exception {
         if (path.startsWith("/"))
             path = path.substring(1);
         if (path.equals(""))
@@ -158,7 +163,7 @@ public class LogFS extends FuseStubFS {
             if ((inode.mode & FileStat.S_IFDIR) == 0) {
                 throw new Exception(String.valueOf(-ErrorCodes.ENOENT()));
             }
-            if (!checkPrivilege(inode, mask, getContext())) {
+            if (!checkPrivilege(inode, AccessConstants.X_OK)) {
                 throw new Exception(String.valueOf(-ErrorCodes.EACCES()));
             }
             DirectoryBlock directory = new DirectoryBlock().parse(inode.read(mem, 0, 1024), 0, 1024);
@@ -223,11 +228,10 @@ public class LogFS extends FuseStubFS {
         /***
          * In order to make this thread safe, don't storage the MemoryPath!!! Allocate it every time!!!
          * @param path Path of this.
-         * @param mask Permission needed to get this.
          * @throws Exception If there's error will return the error value as a String.
          */
-        protected MemoryDirectory(String path, int mask) throws Exception {
-            super(path, mask);
+        protected MemoryDirectory(String path) throws Exception {
+            super(path);
             data = getDirectory(inode);
         }
 
@@ -284,11 +288,10 @@ public class LogFS extends FuseStubFS {
         /***
          * In order to make this thread safe, don't storage the MemoryPath!!! Allocate it every time!!!
          * @param path Path of this.
-         * @param mask Permission needed to get this.
          * @throws Exception If there's error will return the error value as a String.
          */
-        protected MemoryFile(String path, int mask) throws Exception {
-            this.inode = inodeOf(path, mask);
+        protected MemoryFile(String path) throws Exception {
+            this.inode = inodeOf(path);
             this.id = this.inode.id;
         }
 
@@ -324,6 +327,13 @@ public class LogFS extends FuseStubFS {
                 stat.st_size.set(inode.size);
         }
 
+        protected boolean access(int mask) {
+            assert 0 <= mask && mask <= 7: "mask is invalid";
+            if (inode == null)
+                return false;
+            return checkPrivilege(inode, mask);
+        }
+
         protected void read(Pointer buffer, long size, long offset) {
             int bytesToRead = (int) Math.min(inode.size - offset, size);
             byte[] bytesRead = inode.read(mem, (int) offset, bytesToRead).array();
@@ -354,8 +364,8 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-    private MemoryDirectory getParentDirectory(String path, int mask) throws Exception {
-        return new MemoryDirectory(getParentComponent(path), mask);
+    private MemoryDirectory getParentDirectory(String path) throws Exception {
+        return new MemoryDirectory(getParentComponent(path));
     }
 
     private static class Logger {
@@ -401,13 +411,13 @@ public class LogFS extends FuseStubFS {
 
     private class Tester{
         private void createFile(String path, String text) throws Exception {
-            MemoryDirectory directory = getParentDirectory(path, 0);
+            MemoryDirectory directory = getParentDirectory(path);
             directory.createFile(getLastComponent(path), ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8)), Inode.SetMode(0777 | FileStat.S_IFREG));
             directory.flush();
         }
 
         private void createDirectory(String path) throws Exception {
-            MemoryDirectory directory = new MemoryDirectory(getParentComponent(path), 0);
+            MemoryDirectory directory = new MemoryDirectory(getParentComponent(path));
             directory.createDirectory(getLastComponent(path), 0777, Inode.Identity);
             directory.flush();
         }
@@ -454,7 +464,7 @@ public class LogFS extends FuseStubFS {
     public int getattr(String path, FileStat stat) {
         logger.log("[INFO]: getattr, " + mountPoint + path);
         try{
-            MemoryFile p = new MemoryFile(path, 0);
+            MemoryFile p = new MemoryFile(path);
             if (p.isDiretory())
                 p = new MemoryDirectory(p);
             p.getattr(stat);
@@ -467,77 +477,78 @@ public class LogFS extends FuseStubFS {
     @Override
     public int chmod(String path, @mode_t long mode) {
         logger.log("[INFO]: chmod, " + path + ", " + mode);
-        // TODO: Implement this
-        // FIXME: check the privilege
+        assert 0 <= mode && mode <= 0777: "mode is not a valid format";
+        try {
+            MemoryFile p = new MemoryFile(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
+            p.inode.mode = mode;
+            p.flush();
+        } catch (Exception e) {
+            return Integer.parseInt(e.getMessage());
+        }
         return 0;
     }
 
     @Override
     public int chown(String path, @uid_t long uid, @gid_t long gid) {
         logger.log("[INFO]: chown, " + path + ", " + uid + ", " + gid);
+        assert -1 <= (int)uid && (int)uid <= 65535: "uid is not valid";
+        assert -1 <= (int)gid && (int)gid <= 65535: "gid is not valid";
         try{
-            MemoryFile p = new MemoryFile(path, 0);
-            // FIXME: check the privilege
-            if ((int) uid != -1) {
+            MemoryFile p = new MemoryFile(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
+            if ((int) uid != -1)
                 p.inode.uid = (int) uid;
-            }
-            if ((int) gid != -1) {
+            if ((int) gid != -1)
                 p.inode.gid = (int) gid;
-            }
             p.flush();
-            return 0;
-        }catch (Exception e){
+        } catch (Exception e) {
             return Integer.parseInt(e.getMessage());
         }
+        return 0;
     }
 
     @Override
     public int utimens(String path, Timespec[] timespec) {
         logger.log("[INFO]: utimens, " + path + ", " + timespec);
         assert timespec.length == 2 : "the length of argument timespec is not 2.";
-        try{
-            MemoryFile p = new MemoryFile(path, 0);
-            // FIXME: check the privilege
+        try {
+            MemoryFile p = new MemoryFile(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             p.inode.lastAccessTime = timespec[0].tv_nsec.longValue();
             p.inode.lastModifyTime = timespec[1].tv_nsec.longValue();
             p.flush();
-            return 0;
-        }catch (Exception e){
+        } catch (Exception e) {
             return Integer.parseInt(e.getMessage());
         }
+        return 0;
     }
 
     @Override
     public int access(String path, int mask) {
         logger.log("[INFO]: access, " + path + ", " + mask);
+//        System.out.println("[INFO] UIDGID: " + getContext().uid.intValue() + "  " + getContext().gid.intValue());
 //        System.out.println(AccessConstants.F_OK + ", " + AccessConstants.R_OK + ", " + AccessConstants.W_OK + ", " + AccessConstants.X_OK);
         try{
-            MemoryFile p = new MemoryFile(path, 0);
-            Inode inode = p.inode;
-            // FIXME: check the privilege
-            FuseContext context = getContext();
-            int flag = 0;
-            if (context.uid.intValue() == inode.uid) {
-                flag |= (inode.mode >> 6) & 0x7;
-            }
-            if (context.gid.intValue() == inode.gid) {
-                flag |= (inode.mode >> 3) & 0x7;
-            }
-            flag |= (inode.mode) & 0x7;
-            p.flush();
-            if ((flag & mask) != mask)
+            MemoryFile p = new MemoryFile(path); // check permission
+            if (!p.access(mask))
                 return -ErrorCodes.EACCES();
-            return 0;
-        }catch (Exception e){
+        } catch (Exception e) {
             return Integer.parseInt(e.getMessage());
         }
+        return 0;
     }
 
     @Override
     public int create(String path, @mode_t long mode, FuseFileInfo fi) {
         logger.log("[INFO]: create, " + mountPoint + path);
         try{
-            MemoryDirectory p = getParentDirectory(path, 0);
+            MemoryDirectory p = getParentDirectory(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             p.createFile(getLastComponent(path), ByteBuffer.allocate(0), Inode.SetMode((int) mode));
             p.flush();
             return 0;
@@ -550,7 +561,9 @@ public class LogFS extends FuseStubFS {
     public int mkdir(String path, @mode_t long mode) {
         logger.log("[INFO]: mkdir, " + mountPoint + path);
         try{
-            MemoryDirectory p = getParentDirectory(path, 0);
+            MemoryDirectory p = getParentDirectory(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             p.createDirectory(getLastComponent(path), mode, Inode.Identity);
             p.flush();
             return 0;
@@ -563,7 +576,9 @@ public class LogFS extends FuseStubFS {
     public int read(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
         logger.log("[INFO]: read, " + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
         try{
-            MemoryFile p = new MemoryFile(path, 0);
+            MemoryFile p = new MemoryFile(path);
+            if (!p.access(AccessConstants.R_OK))
+                return -ErrorCodes.EACCES();
             if (p.isDiretory()) {
                 return -ErrorCodes.EISDIR();
             }
@@ -579,7 +594,9 @@ public class LogFS extends FuseStubFS {
     public int readdir(String path, Pointer buf, FuseFillDir filter, @off_t long offset, FuseFileInfo fi) {
         logger.log("[INFO]: readdir, " + mountPoint + path + ", " + buf + ", " + offset);
         try{
-            MemoryDirectory p = new MemoryDirectory(path, 0);
+            MemoryDirectory p = new MemoryDirectory(path);
+            if (!p.access(AccessConstants.R_OK))
+                return -ErrorCodes.EACCES();
             filter.apply(buf, ".", null, 0);
             filter.apply(buf, "..", null, 0);
             p.read(buf, filter);
@@ -611,7 +628,9 @@ public class LogFS extends FuseStubFS {
     public int rename(String path, String newName) {
         logger.log("[INFO]: rename, " + mountPoint + path);
         try{
-            MemoryDirectory p = getParentDirectory(path, 0);
+            MemoryDirectory p = getParentDirectory(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             String oldName = getLastComponent(path);
             p.rename(oldName, newName);
             p.flush();
@@ -625,7 +644,9 @@ public class LogFS extends FuseStubFS {
     public int rmdir(String path) {
         logger.log("[INFO]: rmdir, " + mountPoint + path);
         try{
-            MemoryDirectory p = getParentDirectory(path, 0);
+            MemoryDirectory p = getParentDirectory(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             p.delete(getLastComponent(path));
             p.flush();
             return 0;
@@ -638,7 +659,9 @@ public class LogFS extends FuseStubFS {
     public int truncate(String path, long offset) {
         logger.log("[INFO]: truncate, " + mountPoint + path + ", " + offset);
         try{
-            MemoryFile p = new MemoryFile(path, 0);
+            MemoryFile p = new MemoryFile(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             p.truncate((int) offset);
             p.flush();
             return 0;
@@ -651,7 +674,9 @@ public class LogFS extends FuseStubFS {
     public int unlink(String path) {
         logger.log("[INFO]: unlink, " + mountPoint + path);
         try{
-            MemoryDirectory p = getParentDirectory(path, 0);
+            MemoryDirectory p = getParentDirectory(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             p.delete(getLastComponent(path));
             p.flush();
             return 0;
@@ -664,8 +689,10 @@ public class LogFS extends FuseStubFS {
     public int link(String oldpath, String newpath) {
         logger.log("[INFO]: link, " + mountPoint + oldpath + ", " + mountPoint + newpath);
         try{
-            MemoryDirectory p = getParentDirectory(newpath, 0);
-            MemoryFile f = new MemoryFile(oldpath, 0);
+            MemoryDirectory p = getParentDirectory(newpath);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
+            MemoryFile f = new MemoryFile(oldpath);
             p.add(getLastComponent(newpath), f.id);
             p.flush();
             return 0;
@@ -686,7 +713,9 @@ public class LogFS extends FuseStubFS {
     public int write(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
         logger.log("[INFO]: write, " + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
         try{
-            MemoryFile p = new MemoryFile(path, 0);
+            MemoryFile p = new MemoryFile(path);
+            if (!p.access(AccessConstants.W_OK))
+                return -ErrorCodes.EACCES();
             if (p.isDiretory()) {
                 return -ErrorCodes.EISDIR();
             }
