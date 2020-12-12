@@ -1,7 +1,6 @@
 package ru.serce.jnrfuse.proj3;
 
 
-import com.sun.javafx.geom.transform.Identity;
 import jnr.ffi.Platform;
 import jnr.ffi.Pointer;
 import jnr.ffi.types.*;
@@ -333,9 +332,9 @@ public class LogFS extends FuseStubFS {
             }
         }
 
-        protected synchronized void truncate(long size) {
-            // TODO: Bug fix here for kailu
+        protected synchronized void truncate(int size) {
             if (size < inode.size) {
+                LogFS.this.write(inode, ByteBuffer.allocate(inode.size - size), size, inode.size - size);
                 inode.updateSize((int) size);
             }
         }
@@ -640,7 +639,7 @@ public class LogFS extends FuseStubFS {
         logger.log("[INFO]: truncate, " + mountPoint + path + ", " + offset);
         try{
             MemoryFile p = new MemoryFile(path, 0);
-            p.truncate(offset);
+            p.truncate((int) offset);
             p.flush();
             return 0;
         }catch (Exception e){
