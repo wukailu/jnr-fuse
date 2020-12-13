@@ -1,6 +1,8 @@
 # Project 3: Log File System
 > Group Member: 陈通, 吴凯路, 闫书弈
+>
 > Github repo: https://github.com/wukailu/jnr-fuse
+>
 > Github invitation link: https://github.com/wukailu/jnr-fuse/invitations
 
 ## 1) Main Data Structures Of File System
