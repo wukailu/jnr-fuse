@@ -11,7 +11,7 @@ rstr() {
 
 
 ROOT="/tmp/mnt"
-TEST="test-4"
+TEST="test-6"
 echo "starting" $TEST
 
 cd $ROOT || error
