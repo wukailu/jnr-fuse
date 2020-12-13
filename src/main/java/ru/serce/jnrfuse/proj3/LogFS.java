@@ -698,8 +698,8 @@ public class LogFS extends FuseStubFS {
                 operationEnd();
                 return -ErrorCodes.EACCES();
             }
-            p.inode.lastAccessTime = timespec[0].tv_nsec.longValue();
-            p.inode.lastModifyTime = timespec[1].tv_nsec.longValue();
+            p.inode.lastAccessTime = timespec[0].tv_sec.longValue() * 1000;
+            p.inode.lastModifyTime = timespec[1].tv_sec.longValue() * 1000;
             p.flush();
         } catch (Exception e) {
             operationEnd();
@@ -983,6 +983,13 @@ public class LogFS extends FuseStubFS {
     public int open(String path, FuseFileInfo fi) {
         operationBegin();
         logger.log("[INFO]: open, " + mountPoint + path);
+        System.out.println("[INFO]: open " + fi.flags.intValue());
+        System.out.println(OpenFlags.O_RDONLY.intValue());
+        System.out.println(OpenFlags.O_WRONLY.intValue());
+        System.out.println(OpenFlags.O_RDWR.intValue());
+        System.out.println(OpenFlags.O_APPEND.intValue());
+        System.out.println(OpenFlags.O_EXCL.intValue());
+
         try{
             if ((fi.flags.intValue() & OpenFlags.O_TRUNC.intValue()) != 0){
                 int ret = truncate_(path, 0);
