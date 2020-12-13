@@ -17,6 +17,7 @@ import java.nio.file.Paths;
 import java.util.*;
 
 import java.io.*;
+import java.util.concurrent.locks.*;
 
 import static jnr.ffi.Platform.OS.WINDOWS;
 
@@ -29,8 +30,11 @@ public class LogFS extends FuseStubFS {
     private Checkpoint checkpoint1, checkpoint2, checkpoint;
     private Map<Integer, Integer> oldInodeMap, newInodeMap;
 
+    private Lock lock;
+
     LogFS(int total_size){
         this(ByteBuffer.allocate(total_size));
+        lock = new ReentrantLock();
     }
 
     // Load from existing mem
@@ -65,6 +69,7 @@ public class LogFS extends FuseStubFS {
         if (inodeCnt == 0){ // create "/"
             createDirectory(0777, Inode.Identity);
         }
+        lock = new ReentrantLock();
     }
 
     static class MemoryManager{
@@ -518,8 +523,8 @@ public class LogFS extends FuseStubFS {
     public static void main(String[] args) {
         ByteBuffer x = readFromDisk("LFS");
         LogFS memfs = new LogFS(x);
-//        memfs.selfTest();
-//        memfs.selfTest2();
+        //memfs.selfTest();
+        //memfs.selfTest2();
         memfs.writeToDisk("LFS");
         try {
             String path;
@@ -598,90 +603,128 @@ public class LogFS extends FuseStubFS {
         return path.substring(0, path.lastIndexOf("/"));
     }
 
+    private void operationBegin()
+    {
+        lock.lock();
+    }
+
+    private void operationEnd()
+    {
+        if (manager.getMark() - checkpoint.lastInodeMap > 1024 * 1024)
+            writeToDisk("LFS");
+        lock.unlock();
+    }
+
     @Override
     public int getattr(String path, FileStat stat) {
+        operationBegin();
         logger.log("[INFO]: getattr, " + mountPoint + path);
         try{
             MemoryFile p = new MemoryFile(path);
             if (p.isDirectory())
                 p = new MemoryDirectory(p);
             p.getattr(stat);
+            operationEnd();
             return 0;
         }catch (Exception e) {
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int chmod(String path, @mode_t long mode) {
+        operationBegin();
         logger.log("[INFO]: chmod, " + path + ", " + mode);
         assert 0 <= mode && mode <= 0777: "mode is not a valid format";
         try {
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             p.inode.mode = mode;
             p.flush();
         } catch (Exception e) {
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
+        operationEnd();
         return 0;
     }
 
     @Override
     public int chown(String path, @uid_t long uid, @gid_t long gid) {
+        operationBegin();
         logger.log("[INFO]: chown, " + path + ", " + uid + ", " + gid);
         assert -1 <= (int)uid && (int)uid <= 65535: "uid is not valid";
         assert -1 <= (int)gid && (int)gid <= 65535: "gid is not valid";
         try{
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             if ((int) uid != -1)
                 p.inode.uid = (int) uid;
             if ((int) gid != -1)
                 p.inode.gid = (int) gid;
             p.flush();
         } catch (Exception e) {
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
+        operationEnd();
         return 0;
     }
 
     @Override
     public int utimens(String path, Timespec[] timespec) {
+        operationBegin();
         logger.log("[INFO]: utimens, " + path + ", " + timespec);
         assert timespec.length == 2 : "the length of argument timespec is not 2.";
         try {
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             p.inode.lastAccessTime = timespec[0].tv_nsec.longValue();
             p.inode.lastModifyTime = timespec[1].tv_nsec.longValue();
             p.flush();
         } catch (Exception e) {
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
+        operationEnd();
         return 0;
     }
 
     @Override
     public int access(String path, int mask) {
+        operationBegin();
         logger.log("[INFO]: access, " + path + ", " + mask);
 //        System.out.println("[INFO] UIDGID: " + getContext().uid.intValue() + "  " + getContext().gid.intValue());
 //        System.out.println(AccessConstants.F_OK + ", " + AccessConstants.R_OK + ", " + AccessConstants.W_OK + ", " + AccessConstants.X_OK);
         try{
             MemoryFile p = new MemoryFile(path); // check permission
             if (!p.access(mask))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
         } catch (Exception e) {
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
+        operationEnd();
         return 0;
     }
 
-    @Override
-    public int create(String path, @mode_t long mode, FuseFileInfo fi) {
+    public int create_(String path, @mode_t long mode, FuseFileInfo fi) {
         logger.log("[INFO]: create, " + mountPoint + path);
         try{
             MemoryDirectory p = getParentDirectory(path);
@@ -696,60 +739,91 @@ public class LogFS extends FuseStubFS {
     }
 
     @Override
+    public int create(String path, @mode_t long mode, FuseFileInfo fi) {
+        operationBegin();
+        int p = create_(path, mode, fi);
+        operationEnd();
+        return p;
+    }
+
+    @Override
     public int mkdir(String path, @mode_t long mode) {
+        operationBegin();
         logger.log("[INFO]: mkdir, " + mountPoint + path);
         try{
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             p.createDirectory(getLastComponent(path), mode, Inode.Identity);
             p.flush();
+            operationEnd();
             return 0;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int read(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
+        operationBegin();
         logger.log("[INFO]: read, " + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
         try{
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.R_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             if (p.isDirectory()) {
+                operationEnd();
                 return -ErrorCodes.EISDIR();
             }
             int ret = p.read(buf, size, offset);
             p.flush();
+            operationEnd();
             return ret;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int readdir(String path, Pointer buf, FuseFillDir filter, @off_t long offset, FuseFileInfo fi) {
+        operationBegin();
         logger.log("[INFO]: readdir, " + mountPoint + path + ", " + buf + ", " + offset);
         try{
             MemoryDirectory p = new MemoryDirectory(path);
             if (!p.access(AccessConstants.R_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             int ret = 0;
             ret += filter.apply(buf, ".", null, 0);
             ret += filter.apply(buf, "..", null, 0);
             ret += p.read(buf, filter);
             p.flush();
             if (ret != 0)
+            {
+                operationEnd();
                 return -ErrorCodes.EFBIG();
+            }
+            operationEnd();
             return 0;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int statfs(String path, Statvfs stbuf) {
+        operationBegin();
         logger.log("[INFO]: statfs, " + mountPoint + path);
         if (Platform.getNativePlatform().getOS() == WINDOWS) {
             // statfs needs to be implemented on Windows in order to allow for copying
@@ -762,18 +836,23 @@ public class LogFS extends FuseStubFS {
                 stbuf.f_bfree.set(100 * 1024);  // free blocks in fs
             }
         }
+        operationEnd();
         return super.statfs(path, stbuf);
     }
 
     @Override
     public int rename(String path, String newPath) {
+        operationBegin();
         logger.log("[INFO]: rename, " + mountPoint + path);
         try{
 
             if (getParentComponent(newPath).equals(getParentComponent(path))){
                 MemoryDirectory p = getParentDirectory(path);
                 if (!p.access(AccessConstants.W_OK))
+                {
+                    operationEnd();
                     return -ErrorCodes.EACCES();
+                }
                 String oldName = getLastComponent(path);
                 p.rename(oldName, getLastComponent(newPath));
                 p.flush();
@@ -785,29 +864,36 @@ public class LogFS extends FuseStubFS {
                 p.flush();
                 t.flush();
             }
+            operationEnd();
             return 0;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int rmdir(String path) {
+        operationBegin();
         logger.log("[INFO]: rmdir, " + mountPoint + path);
         try{
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             p.delete(getLastComponent(path));
             p.flush();
+            operationEnd();
             return 0;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
-    @Override
-    public int truncate(String path, long offset) {
+    private int truncate_(String path, long offset) {
         logger.log("[INFO]: truncate, " + mountPoint + path + ", " + offset);
         try{
             MemoryFile p = new MemoryFile(path);
@@ -822,97 +908,140 @@ public class LogFS extends FuseStubFS {
     }
 
     @Override
+    public int truncate(String path, long offset) {
+        operationBegin();
+        int p = truncate_(path, offset);
+        operationEnd();
+        return p;
+    }
+
+    @Override
     public int unlink(String path) {
+        operationBegin();
         logger.log("[INFO]: unlink, " + mountPoint + path);
         try{
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             int inode = p.delete(getLastComponent(path));
             p.flush();
             MemoryFile f = new MemoryFile(inode);
             f.inode.hardLinks -= 1;
             f.flush();
+            operationEnd();
             return 0;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int link(String oldpath, String newpath) {
+        operationBegin();
         logger.log("[INFO]: link, " + mountPoint + oldpath + ", " + mountPoint + newpath);
         try{
             MemoryDirectory p = getParentDirectory(newpath);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             if(p.hasChild(getLastComponent(newpath)))
+            {
+                operationEnd();
                 return -ErrorCodes.EEXIST();
+            }
             MemoryFile f = new MemoryFile(oldpath);
             f.inode.hardLinks += 1;
             f.flush();
 
             p.add(getLastComponent(newpath), f.id);
             p.flush();
+            operationEnd();
             return 0;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
 
     @Override
     public int open(String path, FuseFileInfo fi) {
+        operationBegin();
         logger.log("[INFO]: open, " + mountPoint + path);
         try{
             if ((fi.flags.intValue() & OpenFlags.O_TRUNC.intValue()) != 0){
-                int ret = truncate(path, 0);
+                int ret = truncate_(path, 0);
                 if (ret != 0)
+                {
+                    operationEnd();
                     return ret;
+                }
             }
             MemoryFile p = new MemoryFile(path);
             if (p.isDirectory()) {
+                operationEnd();
                 return -ErrorCodes.EISDIR();
             }
             fi.fh.set(p.id);
             p.flush();
+            operationEnd();
             return 0;
         }catch (Exception e){
             int error = Integer.parseInt(e.getMessage());
             if (error == ErrorCodes.ENOENT() && (fi.flags.intValue() & OpenFlags.O_CREAT.intValue()) != 0){
-                int ret = create(path, 0644, fi);
+                int ret = create_(path, 0644, fi);
                 if (ret != 0)
+                {
+                    operationEnd();
                     return ret;
+                }
                 try{
                     MemoryFile p = new MemoryFile(path);
                     if (p.isDirectory()) {
+                        operationEnd();
                         return -ErrorCodes.EISDIR();
                     }
                     fi.fh.set(p.id);
                     p.flush();
                 }catch (Exception e2){
+                    operationEnd();
                     return Integer.parseInt(e2.getMessage());
                 }
             }else{
+                operationEnd();
                 return Integer.parseInt(e.getMessage());
             }
         }
+        operationEnd();
         return 0;
     }
 
     @Override
     public int write(String path, Pointer buf, @size_t long size, @off_t long offset, FuseFileInfo fi) {
+        operationBegin();
         logger.log("[INFO]: write, " + mountPoint + path + ", " + buf + ", " + size + ", " + offset);
         try{
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.W_OK))
+            {
+                operationEnd();
                 return -ErrorCodes.EACCES();
+            }
             if (p.isDirectory()) {
+                operationEnd();
                 return -ErrorCodes.EISDIR();
             }
             int ret = p.write(buf, size, offset);
             p.flush();
+            operationEnd();
             return ret;
         }catch (Exception e){
+            operationEnd();
             return Integer.parseInt(e.getMessage());
         }
     }
