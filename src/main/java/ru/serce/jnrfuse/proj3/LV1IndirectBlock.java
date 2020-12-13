@@ -72,19 +72,13 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
             if (startAddress >= 1024)
                 startAddress -= 1024;
             else {
-                DataBlock d;
-                if(startAddress != 0){
-                    if (block != 0)
-                        d = new DataBlock().parse(manager.read(block, 1024));
-                    else
-                        d = new DataBlock();
-                    data.get(d.data, startAddress, Math.min(len, 1024 - startAddress));
-                }else {
-                    d = new DataBlock().parse(data, data.position(), Math.min(1024, len));
-                }
+                DataBlock d = new DataBlock();
+
+                if (block != 0 && !(startAddress == 0 && len >= 1024))
+                    d.parse(manager.read(block, 1024));
+                data.get(d.data, startAddress, Math.min(len, 1024 - startAddress));
 
                 blocks[i] = manager.write(d.flush());
-
                 len -= Math.min(len, 1024 - startAddress);
                 startAddress = 0;
             }

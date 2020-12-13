@@ -101,7 +101,8 @@ public class Inode extends writableObject<Inode> {
      * @return Return a ByteBuffer containing required data.
      */
     public ByteBuffer read(LogFS.MemoryManager manager, int startAddress, int len){
-        assert len > 0;
+        if (startAddress > size)
+            return ByteBuffer.allocate(len);
         ByteBuffer ret = ByteBuffer.allocate(len);
 
         if (startAddress < dataBlocks.length * 1024){
