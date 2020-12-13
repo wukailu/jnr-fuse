@@ -64,7 +64,7 @@ public class LogFS extends FuseStubFS {
         Collections.reverse(f);
         for(InodeMap m: f)
             oldInodeMap.putAll(m.inodeMap);
-        for(int i: oldInodeMap.values())
+        for(int i: oldInodeMap.keySet())
             inodeCnt = Math.max(inodeCnt, i);
         if (inodeCnt == 0){ // create "/"
             createDirectory(0777, Inode.Identity);
