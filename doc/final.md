@@ -28,7 +28,7 @@ In `src/main/java/ru.serce.jnrfuse/proj3`,
 
 ## 3) Requirements 7-10
 
-* Requirement 7: To fetch a file, we require the ancestor directories has `x` permission. For each operation, we check whether the file has the corresponding permissions.
+* Requirement 7: To fetch a file, we require the ancestor directories has `x` permission. For each operation, we check whether the file has the corresponding permissions. `chmod`, `chown` and `chgrp` can be executed if and only if you have write permission.
 
 * Requirement 8: For each operation we implemented, it will call for the global lock in the beginning and release it in the end.
 
