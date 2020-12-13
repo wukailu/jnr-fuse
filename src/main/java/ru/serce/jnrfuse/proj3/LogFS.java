@@ -21,8 +21,7 @@ import java.io.*;
 import static jnr.ffi.Platform.OS.WINDOWS;
 
 public class LogFS extends FuseStubFS {
-    private ByteBuffer mem;
-    private int mark;
+    MemoryManager manager;
     private int inodeCnt;
     /* The total size of FS, counted in Byte */
     private final int total_size;
@@ -36,7 +35,6 @@ public class LogFS extends FuseStubFS {
 
     // Load from existing mem
     LogFS(ByteBuffer mem){
-        this.mem = mem;
         this.total_size = mem.capacity();
         checkpoint1 = new Checkpoint();
         checkpoint2 = new Checkpoint();
@@ -46,7 +44,7 @@ public class LogFS extends FuseStubFS {
             checkpoint = checkpoint1;
         else
             checkpoint = checkpoint2;
-        mark(checkpoint.lastInodeMap + 1024);
+        this.manager = new MemoryManager(mem, checkpoint.lastInodeMap + 1024);
         oldInodeMap = new HashMap<Integer, Integer>();
         newInodeMap = new HashMap<Integer, Integer>();
         inodeCnt = 0;
@@ -69,14 +67,47 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-    private void reset(){
-        mem.position(mark).mark();
+    static class MemoryManager{
+        private ByteBuffer mem;
+        private int mark;
+        MemoryManager(ByteBuffer mem, int mark){
+            this.mem = mem;
+            this.mark = mark;
+        }
+
+        public int write(ByteBuffer data){
+            int ret = mark;
+            mem.position(mark);
+            mem.put(data);
+            if(mem.position()%1024 != 0)
+                mark = (mem.position()/1024 + 1) * 1024;
+            else
+                mark = mem.position();
+            return ret;
+        }
+
+        public int write_at(ByteBuffer data, int startAddress){
+            mem.position(startAddress);
+            mem.put(data);
+            return startAddress;
+        }
+
+        public ByteBuffer read(int startAddress, int len){
+            byte[] ret = new byte[len];
+            mem.position(startAddress);
+            mem.get(ret, 0, len);
+            return ByteBuffer.wrap(ret);
+        }
+
+        public byte[] toBytes(){
+            return mem.array();
+        }
+
+        public int getMark(){
+            return mark;
+        }
     }
 
-    private void mark(int newMark){
-        mark = newMark;
-        mem.position(newMark).mark();
-    }
 
     private static ByteBuffer readFromDisk(String s)
     {
@@ -110,29 +141,23 @@ public class LogFS extends FuseStubFS {
         int p = checkpoint.lastInodeMap, q = p + 1024;
         InodeMap m = new InodeMap();
         m.preInodeMapAddress = p;
-        reset();
         for (Map.Entry<Integer, Integer> e : newInodeMap.entrySet())
         {
             m.inodeMap.put(e.getKey(), e.getValue());
             if (m.size() == 127)
             {
-                p = mem.position();
-                m.flush(mem, p);
+                p = manager.write(m.flush());
                 m = new InodeMap();
                 m.preInodeMapAddress = p;
             }
         }
         if (m.size() > 0)
-        {
-            p = mem.position();
-            m.flush(mem, p);
-        }
-        mark(mem.position());
+            p = manager.write(m.flush());
         oldInodeMap.putAll(newInodeMap);
         newInodeMap = new HashMap<Integer, Integer>();
         checkpoint.update(p);
-        checkpoint.flush(mem, total_size-2048);
-        checkpoint.flush(mem, total_size-1024);
+        manager.write_at(checkpoint.flush(), total_size-2048);
+        manager.write_at(checkpoint.flush(), total_size-1024);
         System.out.println(checkpoint.lastInodeMap);
         return q;
     }
@@ -149,14 +174,12 @@ public class LogFS extends FuseStubFS {
                 e.printStackTrace();
             }
         }
-        byte[] x = new byte[total_size];
-        mem.position(0);
-        mem.get(x);
+        byte[] x = manager.toBytes();
         try {
             RandomAccessFile out = new RandomAccessFile(file, "rw");
             try {
                 out.seek(p);
-                out.write(x,p,mark-p);
+                out.write(x,p,manager.getMark()-p);
                 out.seek(total_size-2048);
                 out.write(x,total_size-2048,2048);
                 //out.write(x,0,1024*1024*100);
@@ -210,15 +233,11 @@ public class LogFS extends FuseStubFS {
      * @return  Return the inode of the directory.
      */
     private Inode createDirectory(long mode, Inode.Handler handler){
-        ByteBuffer dataBuffer = ByteBuffer.allocate(1024);
-        DirectoryBlock directoryBlock = new DirectoryBlock();
-        directoryBlock.flush(dataBuffer);
-        dataBuffer.flip();
         Inode.Handler newHandler = Inode.Sequential(
             handler,
             Inode.SetMode((int) mode | FileStat.S_IFDIR)
         );
-        return createInode(dataBuffer, newHandler);
+        return createInode(new DirectoryBlock().flush(), newHandler);
     }
 
     /***
@@ -227,10 +246,7 @@ public class LogFS extends FuseStubFS {
      * @return          The new address on disk where it write to.
      */
     private synchronized int update(Inode node){
-        int ret = mark;
-        reset();
-        node.flush(mem);
-        mark(mem.position());
+        int ret = manager.write(node.flush());
         newInodeMap.put(node.id, ret);
         return ret;
     }
@@ -268,7 +284,7 @@ public class LogFS extends FuseStubFS {
             if (!checkPrivilege(inode, AccessConstants.X_OK)) {
                 throw new Exception(String.valueOf(-ErrorCodes.EACCES()));
             }
-            DirectoryBlock directory = new DirectoryBlock().parse(inode.read(mem, 0, inode.space));
+            DirectoryBlock directory = new DirectoryBlock().parse(inode.read(manager, 0, inode.space));
             Object ret = directory.contents.get(s);
             if(ret == null)
                 throw new Exception(String.valueOf(-ErrorCodes.ENOENT()));
@@ -283,7 +299,7 @@ public class LogFS extends FuseStubFS {
      * @return  The Inode.
      */
     private Inode inodeOf(int id) throws Exception {
-        return new Inode(id).parse(mem, getInodeAddress(id), 1024);
+        return new Inode(id).parse(manager.read(getInodeAddress(id), 1024));
     }
 
     /***
@@ -306,7 +322,7 @@ public class LogFS extends FuseStubFS {
      * @return              A ByteBuffer contain the data.
      */
     private ByteBuffer read(Inode node, int readOffset, int size) {
-        return node.read(mem, readOffset, size);
+        return node.read(manager, readOffset, size);
     }
 
     /***
@@ -317,9 +333,7 @@ public class LogFS extends FuseStubFS {
      * @param size          The size of data need to write to disk in buffer.
      */
     private synchronized void write(Inode node, ByteBuffer buffer, int writeOffset, int size) {
-        reset();
-        node.write(buffer, mem, writeOffset, size);
-        mark(mem.position());
+        node.write(buffer, manager, writeOffset, size);
         update(node);
     }
 
@@ -376,9 +390,8 @@ public class LogFS extends FuseStubFS {
         @Override
         protected void flush(){
             if (data != null){
-                ByteBuffer buffer = ByteBuffer.allocate(data.totalBlocks()*1024);
-                data.flush(buffer);
-                buffer.flip();
+                inode.clearData();
+                ByteBuffer buffer = data.flush();
                 LogFS.this.write(inode, buffer, 0, buffer.remaining());
             }
             super.flush();
@@ -440,7 +453,7 @@ public class LogFS extends FuseStubFS {
 
         protected int read(Pointer buffer, long size, long offset) {
             int bytesToRead = (int) Math.min(inode.size - offset, size);
-            byte[] bytesRead = inode.read(mem, (int) offset, bytesToRead).array();
+            byte[] bytesRead = inode.read(manager, (int) offset, bytesToRead).array();
             synchronized (this) {
                 buffer.put(0, bytesRead, 0, bytesToRead);
             }

@@ -12,17 +12,15 @@ public class DirectoryBlock extends writableObject<DirectoryBlock> {
     }
 
     @Override
-    public int flush(ByteBuffer mem, int startAddress) {
-        mem.position(startAddress);
+    public ByteBuffer flush() {
+        ByteBuffer mem = ByteBuffer.allocate(totalBlocks()*1024);
         for (Map.Entry<String, Integer> entry : contents.entrySet()) {
             mem.putInt(entry.getKey().length());
             mem.put(entry.getKey().getBytes());
             mem.putInt(entry.getValue());
         }
-        if (mem.position()%1024 == 0)
-            return mem.position();
-        mem.position( (1+mem.position()/1024)*1024 );
-        return mem.position();
+        mem.position(0);
+        return mem;
     }
 
     public int totalBlocks(){

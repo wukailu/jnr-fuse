@@ -21,13 +21,13 @@ public class Checkpoint extends writableObject<Checkpoint>{
     }
 
     @Override
-    public int flush(ByteBuffer mem, int startAddress) {
-        mem.position(startAddress);
+    public ByteBuffer flush() {
+        ByteBuffer mem = ByteBuffer.allocate(1024);
         mem.putLong(beginTime);
         mem.putInt(lastInodeMap);
         mem.putLong(endTime);
-        mem.position(startAddress + 1024);
-        return mem.position();
+        mem.position(0);
+        return mem;
     }
 
     @Override

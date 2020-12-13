@@ -19,16 +19,16 @@ public class InodeMap extends writableObject<InodeMap>{
     }
 
     @Override
-    public int flush(ByteBuffer mem, int startAddress) {
-        mem.position(startAddress);
+    public ByteBuffer flush() {
+        ByteBuffer mem = ByteBuffer.allocate(1024);
         mem.putInt(preInodeMapAddress);
         mem.putInt(0);
         for (Map.Entry<Integer, Integer> entry : inodeMap.entrySet()) {
             mem.putInt(entry.getKey());
             mem.putInt(entry.getValue());
         }
-        mem.position(startAddress + 1024);
-        return mem.position();
+        mem.position(0);
+        return mem;
     }
 
     @Override
