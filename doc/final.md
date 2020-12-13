@@ -44,7 +44,7 @@ In `src/main/java/ru.serce.jnrfuse/proj3`,
 
 * Test for hard links: In `test-4-hardlink.sh`, we build some hard links, then modify the files and `cat` other links.
 
-* Test for `sync`: In `test-5-hardlink.sh`, we use `sync` and then restart the file system to see whether the file is correctly write to the disk.
+* Test for `sync`: In `test-5-sync.sh`, we use `sync` and then restart the file system to see whether the file is correctly write to the disk.
 
 * Test for multi-process: We use several terminals to run tests at the same time.
 
