@@ -53,8 +53,8 @@ public class LogFS extends FuseStubFS {
         newInodeMap = new HashMap<Integer, Integer>();
         inodeCnt = 0;
         int lastInodeMap = checkpoint.lastInodeMap;
-        System.out.println(total_size);
-        System.out.println(lastInodeMap);
+//        System.out.println(total_size);
+//        System.out.println(lastInodeMap);
         List<InodeMap> f = new ArrayList<>();
         while (lastInodeMap > 0){
             InodeMap inodeMap = new InodeMap().parse(mem, lastInodeMap, 1024);
@@ -163,7 +163,7 @@ public class LogFS extends FuseStubFS {
         checkpoint.update(p);
         manager.write_at(checkpoint.flush(), total_size-2048);
         manager.write_at(checkpoint.flush(), total_size-1024);
-        System.out.println(checkpoint.lastInodeMap);
+//        System.out.println(checkpoint.lastInodeMap);
         return q;
     }
 
