@@ -19,8 +19,20 @@ public class DirectoryBlock extends writableObject<DirectoryBlock> {
             mem.put(entry.getKey().getBytes());
             mem.putInt(entry.getValue());
         }
-        mem.position(startAddress + 1024);
+        if (mem.position()%1024 == 0)
+            return mem.position();
+        mem.position( (1+mem.position()/1024)*1024 );
         return mem.position();
+    }
+
+    public int totalBlocks(){
+        int all = 0;
+        for (Map.Entry<String, Integer> entry : contents.entrySet()){
+            all += 4;
+            all += entry.getKey().getBytes().length;
+            all += 4;
+        }
+        return all/1024 + 1;
     }
 
     @Override
