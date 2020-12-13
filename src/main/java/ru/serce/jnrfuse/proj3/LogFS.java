@@ -369,8 +369,8 @@ public class LogFS extends FuseStubFS {
             data.contents.put(newChildName, o);
         }
 
-        protected void delete(String childName){
-            data.contents.remove(childName);
+        protected Integer delete(String childName){
+            return data.contents.remove(childName);
         }
 
         protected void add(String childName, int childID){
@@ -766,18 +766,25 @@ public class LogFS extends FuseStubFS {
     }
 
     @Override
-    public int rename(String path, String newName) {
+    public int rename(String path, String newPath) {
         logger.log("[INFO]: rename, " + mountPoint + path);
         try{
-            if (!getParentComponent(newName).equals(getParentComponent(path)))
-                return -ErrorCodes.EINVAL();
-            newName = getLastComponent(newName);
-            MemoryDirectory p = getParentDirectory(path);
-            if (!p.access(AccessConstants.W_OK))
-                return -ErrorCodes.EACCES();
-            String oldName = getLastComponent(path);
-            p.rename(oldName, newName);
-            p.flush();
+
+            if (getParentComponent(newPath).equals(getParentComponent(path))){
+                MemoryDirectory p = getParentDirectory(path);
+                if (!p.access(AccessConstants.W_OK))
+                    return -ErrorCodes.EACCES();
+                String oldName = getLastComponent(path);
+                p.rename(oldName, getLastComponent(newPath));
+                p.flush();
+            }else{
+                MemoryDirectory p = getParentDirectory(path);
+                MemoryDirectory t = getParentDirectory(newPath);
+                Integer o = p.delete(getLastComponent(path));
+                t.add(getLastComponent(newPath), o);
+                p.flush();
+                t.flush();
+            }
             return 0;
         }catch (Exception e){
             return Integer.parseInt(e.getMessage());
@@ -818,15 +825,14 @@ public class LogFS extends FuseStubFS {
     public int unlink(String path) {
         logger.log("[INFO]: unlink, " + mountPoint + path);
         try{
-            MemoryFile f = new MemoryFile(path);
-            f.inode.hardLinks -= 1;
-            f.flush();
-
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
                 return -ErrorCodes.EACCES();
             p.delete(getLastComponent(path));
             p.flush();
+            MemoryFile f = new MemoryFile(path);
+            f.inode.hardLinks -= 1;
+            f.flush();
             return 0;
         }catch (Exception e){
             return Integer.parseInt(e.getMessage());
