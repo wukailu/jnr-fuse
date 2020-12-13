@@ -48,5 +48,4 @@ echo ${#res}
 echo $[($num + 1) * $num / 2]
 if [ ${#res} != $[($num + 1) * $num / 2] ]; then error; fi
 
-
 echo "Success!"
