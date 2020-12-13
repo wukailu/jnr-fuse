@@ -754,7 +754,6 @@ public class LogFS extends FuseStubFS {
     }
 
     public int create_(String path, @mode_t long mode, FuseFileInfo fi) {
-        logger.log("[INFO]: create, " + mountPoint + path);
         try{
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
@@ -769,6 +768,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int create(String path, @mode_t long mode, FuseFileInfo fi) {
+        logger.log("[INFO]: create, " + mountPoint + path);
         operationBegin();
         int p = create_(path, mode, fi);
         operationEnd();
@@ -927,7 +927,6 @@ public class LogFS extends FuseStubFS {
     }
 
     private int truncate_(String path, long offset) {
-        logger.log("[INFO]: truncate, " + mountPoint + path + ", " + offset);
         try{
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.W_OK))
@@ -942,6 +941,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int truncate(String path, long offset) {
+        logger.log("[INFO]: truncate, " + mountPoint + path + ", " + offset);
         operationBegin();
         int p = truncate_(path, offset);
         operationEnd();
