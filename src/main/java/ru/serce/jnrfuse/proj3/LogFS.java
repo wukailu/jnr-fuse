@@ -527,7 +527,7 @@ public class LogFS extends FuseStubFS {
         LogFS memfs = new LogFS(x);
         //memfs.selfTest();
         //memfs.selfTest2();
-        memfs.writeToDisk("LFS");
+        //memfs.writeToDisk("LFS");
         try {
             String path;
             if (Platform.getNativePlatform().getOS() == WINDOWS) {
@@ -1050,10 +1050,7 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int flush(String path, FuseFileInfo fi) {
-        operationBegin();
         logger.log("[INFO]: flush, " + path + ", " + fi);
-        writeToDisk("LFS");
-        operationEnd();
         return 0;
     }
 
