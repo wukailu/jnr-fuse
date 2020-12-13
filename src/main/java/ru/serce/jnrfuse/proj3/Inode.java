@@ -86,6 +86,23 @@ public class Inode extends writableObject<Inode> {
         return this;
     }
 
+    public void pretty_print()
+    {
+        System.out.printf("---------- inode block ----------\n");
+        System.out.printf("id: %d\n",id);
+        System.out.printf("uid: %d\n",uid);
+        System.out.printf("gid: %d\n",gid);
+        System.out.printf("mode: %d\n",mode);
+        System.out.printf("last access time: %d\n",lastAccessTime);
+        System.out.printf("last modify time: %d\n",lastModifyTime);
+        System.out.printf("last change time: %d\n",lastChangeTime);
+        System.out.printf("create time: %d\n",createTime);
+        System.out.printf("space: %d\n",space);
+        System.out.printf("size: %d\n",size);
+        System.out.printf("hard links: %d\n",hardLinks);
+        System.out.printf("-------------- end --------------\n\n");
+    }
+
     public void clearData(){
         Arrays.fill(dataBlocks, 0);
         Arrays.fill(lv1Block, 0);

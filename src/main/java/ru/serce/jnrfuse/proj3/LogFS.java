@@ -526,9 +526,32 @@ public class LogFS extends FuseStubFS {
 
     private final Logger logger = new Logger(1);
 
+    private class block_dump
+    {
+        private void pretty_print()
+        {
+            operationBegin();
+            Map<Integer, Integer> m = oldInodeMap;
+            m.putAll(newInodeMap);
+            for (Integer x : m.values())
+            {
+                Inode i = new Inode(0).parse(manager.read(x, 1024));
+                i.pretty_print();
+            }
+            operationEnd();
+        }
+    }
+
+    public void pretty_print()
+    {
+        block_dump d = new block_dump();
+        d.pretty_print();
+    }
+
     public static void main(String[] args) {
         ByteBuffer x = readFromDisk("LFS");
         LogFS memfs = new LogFS(x);
+        //memfs.pretty_print();
         //memfs.selfTest();
         //memfs.selfTest2();
         //memfs.writeToDisk("LFS");
