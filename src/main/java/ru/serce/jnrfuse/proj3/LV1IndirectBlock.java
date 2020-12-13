@@ -12,11 +12,12 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
     }
 
     @Override
-    public int flush(ByteBuffer mem, int startAddress) {
-        mem.position(startAddress);
+    public ByteBuffer flush() {
+        ByteBuffer mem = ByteBuffer.allocate(1024);
         for (int i: subBlocks)
             mem.putInt(i);
-        return mem.position();
+        mem.position(0);
+        return mem;
     }
 
     @Override
@@ -30,20 +31,20 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
         return this;
     }
 
-    public ByteBuffer read(ByteBuffer mem, int startAddress, int len){
-        return readBlocks(mem, startAddress, len, subBlocks);
+    public ByteBuffer read(LogFS.MemoryManager manager, int startAddress, int len){
+        return readBlocks(manager, startAddress, len, subBlocks);
     }
 
-    public void write(ByteBuffer data, ByteBuffer mem, int startAddress, int len){
+    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len){
         if (len <= 0) return;
-        writeBlocks(data, mem, startAddress, len, subBlocks);
+        writeBlocks(data, manager, startAddress, len, subBlocks);
         for (int i = 0; i < subBlocks.length; i++)
             if (subBlocks[i] != 0)
                 subBlockLen = i+1;
     }
 
     // TODO: this part can be speed up
-    public static ByteBuffer readBlocks(ByteBuffer mem, int startAddress, int len, int[] blocks){
+    public static ByteBuffer readBlocks(LogFS.MemoryManager manager, int startAddress, int len, int[] blocks){
         assert len > 0;
         ByteBuffer ret = ByteBuffer.allocate(len);
         for (int block : blocks) {
@@ -51,7 +52,7 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
                 if (startAddress >= 1024)
                     startAddress -= 1024;
                 else {
-                    ret.put(mem.array(), block + startAddress, Math.min(len, 1024 - startAddress));
+                    ret.put(manager.read(block + startAddress, Math.min(len, 1024 - startAddress)).array());
                     len -= Math.min(len, 1024 - startAddress);
                     startAddress = 0;
                 }
@@ -63,30 +64,26 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
         return ret;
     }
 
-    public static void writeBlocks(ByteBuffer data, ByteBuffer mem, int startAddress, int len, int[] blocks){
-        assert len > 0;
+    public static void writeBlocks(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, int[] blocks){
+        if(len == 0)
+            return;
         for (int i = 0; i < blocks.length; i++) {
             int block = blocks[i];
             if (startAddress >= 1024)
                 startAddress -= 1024;
             else {
-                int mark = mem.reset().position();
-
                 DataBlock d;
                 if(startAddress != 0){
                     if (block != 0)
-                        d = new DataBlock(mem, block, 1024);
+                        d = new DataBlock().parse(manager.read(block, 1024));
                     else
-                        d = new DataBlock(mem, mem.position(), 1024);
+                        d = new DataBlock();
                     data.get(d.data, startAddress, Math.min(len, 1024 - startAddress));
                 }else {
-                    d = new DataBlock(data, data.position(), Math.min(1024, data.remaining()));
+                    d = new DataBlock().parse(data, 0, Math.min(1024, data.remaining()));
                 }
 
-                mem.position(mark);
-                blocks[i] = mem.position();
-                d.flush(mem, mem.position());
-                mem.mark();
+                blocks[i] = manager.write(d.flush());
 
                 len -= Math.min(len, 1024 - startAddress);
                 startAddress = 0;

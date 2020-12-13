@@ -40,8 +40,8 @@ public class Inode extends writableObject<Inode> {
     }
 
     @Override
-    public int flush(ByteBuffer mem, int startAddress) {
-        mem.position(startAddress);
+    public ByteBuffer flush() {
+        ByteBuffer mem = ByteBuffer.allocate(1024);
         mem.putInt(id);
         mem.putInt(uid);
         mem.putInt(gid);
@@ -53,11 +53,12 @@ public class Inode extends writableObject<Inode> {
         mem.putInt(space);
         mem.putInt(size);
         mem.putInt(hardLinks);
-        mem.position(startAddress+1024-15*4);
+        mem.position(1024-15*4);
         for (int i: dataBlocks) mem.putInt(i);
         for (int i: lv1Block) mem.putInt(i);
         for (int i: lv2Block) mem.putInt(i);
-        return mem.position();
+        mem.position(0);
+        return mem;
     }
 
     @Override
@@ -85,19 +86,26 @@ public class Inode extends writableObject<Inode> {
         return this;
     }
 
+    public void clearData(){
+        Arrays.fill(dataBlocks, 0);
+        Arrays.fill(lv1Block, 0);
+        Arrays.fill(lv2Block, 0);
+        updateSize(0);
+    }
+
     /***
-     * @param mem gloable memory
+     * @param manager gloable memory manager
      * @param startAddress Start address relative to the file head. 0 is the head of the file.
      *                     Should be smaller than file size.
      * @param len The size of bytes to read.
      * @return Return a ByteBuffer containing required data.
      */
-    public ByteBuffer read(ByteBuffer mem, int startAddress, int len){
+    public ByteBuffer read(LogFS.MemoryManager manager, int startAddress, int len){
         assert len > 0;
         ByteBuffer ret = ByteBuffer.allocate(len);
 
         if (startAddress < dataBlocks.length * 1024){
-            ByteBuffer data = LV1IndirectBlock.readBlocks(mem, startAddress, len, dataBlocks);
+            ByteBuffer data = LV1IndirectBlock.readBlocks(manager, startAddress, len, dataBlocks);
             len -= data.remaining();
             startAddress = 0;
             ret.put(data);
@@ -106,7 +114,7 @@ public class Inode extends writableObject<Inode> {
         }
 
         if (startAddress < lv1Block.length * 1024 * 256){
-            ByteBuffer data = LV2IndirectBlock.readLv1Blocks(mem, startAddress, len, lv1Block);
+            ByteBuffer data = LV2IndirectBlock.readLv1Blocks(manager, startAddress, len, lv1Block);
             len -= data.remaining();
             startAddress = 0;
             ret.put(data);
@@ -117,7 +125,7 @@ public class Inode extends writableObject<Inode> {
         for (int lv2: lv2Block){
             if(lv2 != 0 && len > 0){
                 if (startAddress < 1024 * 256 * 256){
-                    ByteBuffer data = new LV2IndirectBlock().parse(mem, lv2, 1024).read(mem, startAddress, len);
+                    ByteBuffer data = new LV2IndirectBlock().parse(manager.read(lv2, 1024)).read(manager, startAddress, len);
                     len -= data.remaining();
                     startAddress = 0;
                     ret.put(data);
@@ -133,22 +141,19 @@ public class Inode extends writableObject<Inode> {
 
     /***
      * @param data  Data to write, start from the data.position().
-     * @param mem   gloable memory
+     * @param manager   gloable memory manager
      * @param startAddress  Start address relative to the file head. 0 is the head of the file.
      *                      Should be smaller than file size.
      * @param len   The size of bytes to write, started from data.position().
      */
-    public void write(ByteBuffer data, ByteBuffer mem, int startAddress, int len){
-        if (startAddress > size){ // pad 0
-            write(ByteBuffer.allocate(startAddress-size), mem, size, startAddress-size);
-        }else{
-            mem.reset();
-        }
+    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len){
+        if (startAddress > size)
+            write(ByteBuffer.allocate(startAddress-size), manager, size, startAddress-size);
 
         updateSize(Math.max(size, startAddress + len));
 
         if (startAddress < dataBlocks.length * 1024){
-            LV1IndirectBlock.writeBlocks(data, mem, startAddress, len, dataBlocks);
+            LV1IndirectBlock.writeBlocks(data, manager, startAddress, len, dataBlocks);
             len -= Math.min(len, dataBlocks.length * 1024 - startAddress);
             startAddress = 0;
         }else{
@@ -156,7 +161,7 @@ public class Inode extends writableObject<Inode> {
         }
 
         if (startAddress < lv1Block.length * 1024 * 256){
-            LV2IndirectBlock.writeLv1Blocks(data, mem, startAddress, len, lv1Block);
+            LV2IndirectBlock.writeLv1Blocks(data, manager, startAddress, len, lv1Block);
             len -= Math.min(len, lv1Block.length * 1024 * 256 - startAddress);
             startAddress = 0;
         }else{
@@ -169,17 +174,12 @@ public class Inode extends writableObject<Inode> {
                 if (startAddress < 1024 * 256 * 256){
                     LV2IndirectBlock indirectBlock = new LV2IndirectBlock();
                     if (lv2 != 0){
-                        int mark = mem.reset().position();
-                        indirectBlock.parse(mem, lv2, 1024);
-                        mem.position(mark).mark();
+                        indirectBlock.parse(manager.read(lv2, 1024));
                     }
-                    indirectBlock.write(data, mem, startAddress, len);
+                    indirectBlock.write(data, manager, startAddress, len);
                     len -= Math.min(len, 1024 * 256 * 256 - startAddress);
                     startAddress = 0;
-                    mem.reset();
-                    lv2Block[i] = mem.position();
-                    indirectBlock.flush(mem, mem.position());
-                    mem.mark();
+                    lv2Block[i] = manager.write(indirectBlock.flush());
                 }else {
                     startAddress -= 1024 * 256 * 256;
                 }
@@ -265,5 +265,4 @@ public class Inode extends writableObject<Inode> {
             return inode;
         }
     }
-
 }
