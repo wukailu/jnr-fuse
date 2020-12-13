@@ -266,7 +266,7 @@ public class LogFS extends FuseStubFS {
             if (!checkPrivilege(inode, AccessConstants.X_OK)) {
                 throw new Exception(String.valueOf(-ErrorCodes.EACCES()));
             }
-            DirectoryBlock directory = new DirectoryBlock().parse(inode.read(mem, 0, 1024), 0, 1024);
+            DirectoryBlock directory = new DirectoryBlock().parse(inode.read(mem, 0, inode.space));
             Object ret = directory.contents.get(s);
             if(ret == null)
                 throw new Exception(String.valueOf(-ErrorCodes.ENOENT()));
@@ -291,7 +291,7 @@ public class LogFS extends FuseStubFS {
      */
     private DirectoryBlock getDirectory(Inode node) throws Exception {
         if ((node.mode & FileStat.S_IFDIR) != 0)
-            return new DirectoryBlock().parse(read(node, 0, 1024));
+            return new DirectoryBlock().parse(read(node, 0, node.space));
         else
             throw new Exception(String.valueOf(-ErrorCodes.ENOENT()));
     }
@@ -374,10 +374,10 @@ public class LogFS extends FuseStubFS {
         @Override
         protected void flush(){
             if (data != null){
-                ByteBuffer buffer = ByteBuffer.allocate(1024);
+                ByteBuffer buffer = ByteBuffer.allocate(data.totalBlocks()*1024);
                 data.flush(buffer);
                 buffer.flip();
-                LogFS.this.write(inode, buffer, 0, 1024);
+                LogFS.this.write(inode, buffer, 0, buffer.remaining());
             }
             super.flush();
         }
