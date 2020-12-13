@@ -53,8 +53,8 @@ public class LogFS extends FuseStubFS {
         newInodeMap = new HashMap<Integer, Integer>();
         inodeCnt = 0;
         int lastInodeMap = checkpoint.lastInodeMap;
-        System.out.println(total_size);
-        System.out.println(lastInodeMap);
+//        System.out.println(total_size);
+//        System.out.println(lastInodeMap);
         List<InodeMap> f = new ArrayList<>();
         while (lastInodeMap > 0){
             InodeMap inodeMap = new InodeMap().parse(mem, lastInodeMap, 1024);
@@ -64,7 +64,7 @@ public class LogFS extends FuseStubFS {
         Collections.reverse(f);
         for(InodeMap m: f)
             oldInodeMap.putAll(m.inodeMap);
-        for(int i: oldInodeMap.values())
+        for(int i: oldInodeMap.keySet())
             inodeCnt = Math.max(inodeCnt, i);
         if (inodeCnt == 0){ // create "/"
             createDirectory(0777, Inode.Identity);
@@ -163,7 +163,7 @@ public class LogFS extends FuseStubFS {
         checkpoint.update(p);
         manager.write_at(checkpoint.flush(), total_size-2048);
         manager.write_at(checkpoint.flush(), total_size-1024);
-        System.out.println(checkpoint.lastInodeMap);
+//        System.out.println(checkpoint.lastInodeMap);
         return q;
     }
 
@@ -526,9 +526,32 @@ public class LogFS extends FuseStubFS {
 
     private final Logger logger = new Logger(1);
 
+    private class block_dump
+    {
+        private void pretty_print()
+        {
+            operationBegin();
+            Map<Integer, Integer> m = oldInodeMap;
+            m.putAll(newInodeMap);
+            for (Integer x : m.values())
+            {
+                Inode i = new Inode(0).parse(manager.read(x, 1024));
+                i.pretty_print();
+            }
+            operationEnd();
+        }
+    }
+
+    public void pretty_print()
+    {
+        block_dump d = new block_dump();
+        d.pretty_print();
+    }
+
     public static void main(String[] args) {
         ByteBuffer x = readFromDisk("LFS");
         LogFS memfs = new LogFS(x);
+        //memfs.pretty_print();
         //memfs.selfTest();
         //memfs.selfTest2();
         //memfs.writeToDisk("LFS");
