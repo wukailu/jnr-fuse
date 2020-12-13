@@ -169,6 +169,8 @@ public class LogFS extends FuseStubFS {
 
     private void writeToDisk(String s)
     {
+        if (newInodeMap.isEmpty())
+            return;
         int p = updateInodeMap();
         File file = new File(s);
         if (!file.exists())
@@ -1046,10 +1048,30 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-//    @Override
-//    public int flush(String path, FuseFileInfo fi) {
-//        logger.log("[INFO]: flush, " + path + ", " + fi);
-//        // TODO: this function is for Yan Lao Ge
-//        return 0;
-//    }
+    @Override
+    public int flush(String path, FuseFileInfo fi) {
+        operationBegin();
+        logger.log("[INFO]: flush, " + path + ", " + fi);
+        writeToDisk("LFS");
+        operationEnd();
+        return 0;
+    }
+
+    @Override
+    public int fsync(String path, int isdatasync, FuseFileInfo fi) {
+        operationBegin();
+        logger.log("[INFO]: fsync, " + path + ", " + isdatasync + ", " + fi);
+        writeToDisk("LFS");
+        operationEnd();
+        return 0;
+    }
+
+    @Override
+    public int fsyncdir(String path, FuseFileInfo fi) {
+        operationBegin();
+        logger.log("[INFO]: fsyncdir, " + path + ", " + fi);
+        writeToDisk("LFS");
+        operationEnd();
+        return 0;
+    }
 }
