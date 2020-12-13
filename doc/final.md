@@ -1,6 +1,7 @@
 # Project 3: Log File System
 > Group Member: 陈通, 吴凯路, 闫书弈
 > Github repo: https://github.com/wukailu/jnr-fuse
+> Github invitation link: https://github.com/wukailu/jnr-fuse/invitations
 
 ## 1) Main Data Structures Of File System
 
@@ -57,3 +58,4 @@ In `src/main/java/ru.serce.jnrfuse/proj3`,
 ## 6) Known bugs and limitations
 
 * So far, there's no known bugs.
+* Limitations, number of hard links do not consider `..` in our file system.
