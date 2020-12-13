@@ -828,9 +828,9 @@ public class LogFS extends FuseStubFS {
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
                 return -ErrorCodes.EACCES();
-            p.delete(getLastComponent(path));
+            int inode = p.delete(getLastComponent(path));
             p.flush();
-            MemoryFile f = new MemoryFile(path);
+            MemoryFile f = new MemoryFile(inode);
             f.inode.hardLinks -= 1;
             f.flush();
             return 0;
