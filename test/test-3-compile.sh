@@ -20,6 +20,6 @@ mv hello.cpp $TEST || error
 cd $TEST || error
 
 g++ hello.cpp || error
-./a || error
+./a.out || error
 
 echo "Success!"
