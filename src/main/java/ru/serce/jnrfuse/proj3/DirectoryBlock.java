@@ -19,6 +19,7 @@ public class DirectoryBlock extends writableObject<DirectoryBlock> {
             mem.put(entry.getKey().getBytes());
             mem.putInt(entry.getValue());
         }
+        mem.putInt(0);
         mem.position(0);
         return mem;
     }
@@ -30,6 +31,7 @@ public class DirectoryBlock extends writableObject<DirectoryBlock> {
             all += entry.getKey().getBytes().length;
             all += 4;
         }
+        all += 4;
         return all/1024 + 1;
     }
 

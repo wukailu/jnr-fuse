@@ -17,7 +17,7 @@ public class DataBlock extends writableObject<DataBlock>{
     @Override
     public DataBlock parse(ByteBuffer mem, int startAddress, int len) {
         mem.position(startAddress);
-        mem.get(data, startAddress, len);
+        mem.get(data, 0, len);
         return this;
     }
 }

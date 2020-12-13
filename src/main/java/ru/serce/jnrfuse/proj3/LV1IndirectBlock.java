@@ -80,7 +80,7 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
                         d = new DataBlock();
                     data.get(d.data, startAddress, Math.min(len, 1024 - startAddress));
                 }else {
-                    d = new DataBlock().parse(data, 0, Math.min(1024, data.remaining()));
+                    d = new DataBlock().parse(data, data.position(), Math.min(1024, len));
                 }
 
                 blocks[i] = manager.write(d.flush());

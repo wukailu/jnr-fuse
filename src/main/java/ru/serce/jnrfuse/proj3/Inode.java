@@ -64,7 +64,7 @@ public class Inode extends writableObject<Inode> {
     @Override
     public Inode parse(ByteBuffer mem, int startAddress, int len) {
         mem.position(startAddress);
-        assert len >= 1024;
+//        assert len >= 1024;
         id = mem.getInt();
         uid = mem.getInt();
         gid = mem.getInt();

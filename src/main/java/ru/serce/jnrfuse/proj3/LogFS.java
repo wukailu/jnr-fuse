@@ -387,6 +387,10 @@ public class LogFS extends FuseStubFS {
             add(directoryName, inode.id);
         }
 
+        protected boolean hasChild(String childName){
+            return data.contents.containsKey(childName);
+        }
+
         @Override
         protected void flush(){
             if (data != null){
@@ -432,6 +436,7 @@ public class LogFS extends FuseStubFS {
             stat.st_mode.set(inode.mode);
             stat.st_uid.set(inode.uid);
             stat.st_gid.set(inode.gid);
+            stat.st_nlink.set(inode.hardLinks);
 
             stat.st_ctim.tv_sec.set(inode.lastChangeTime / 1000);
             stat.st_atim.tv_sec.set(inode.lastAccessTime / 1000);
@@ -508,7 +513,7 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-    private final Logger logger = new Logger();
+    private final Logger logger = new Logger(1);
 
     public static void main(String[] args) {
         ByteBuffer x = readFromDisk("LFS");
@@ -764,6 +769,9 @@ public class LogFS extends FuseStubFS {
     public int rename(String path, String newName) {
         logger.log("[INFO]: rename, " + mountPoint + path);
         try{
+            if (!getParentComponent(newName).equals(getParentComponent(path)))
+                return -ErrorCodes.EINVAL();
+            newName = getLastComponent(newName);
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
                 return -ErrorCodes.EACCES();
@@ -810,6 +818,10 @@ public class LogFS extends FuseStubFS {
     public int unlink(String path) {
         logger.log("[INFO]: unlink, " + mountPoint + path);
         try{
+            MemoryFile f = new MemoryFile(path);
+            f.inode.hardLinks -= 1;
+            f.flush();
+
             MemoryDirectory p = getParentDirectory(path);
             if (!p.access(AccessConstants.W_OK))
                 return -ErrorCodes.EACCES();
@@ -828,7 +840,12 @@ public class LogFS extends FuseStubFS {
             MemoryDirectory p = getParentDirectory(newpath);
             if (!p.access(AccessConstants.W_OK))
                 return -ErrorCodes.EACCES();
+            if(p.hasChild(getLastComponent(newpath)))
+                return -ErrorCodes.EEXIST();
             MemoryFile f = new MemoryFile(oldpath);
+            f.inode.hardLinks += 1;
+            f.flush();
+
             p.add(getLastComponent(newpath), f.id);
             p.flush();
             return 0;
