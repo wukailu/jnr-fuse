@@ -4,7 +4,6 @@ package ru.serce.jnrfuse.proj3;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Platform;
 import jnr.ffi.Pointer;
-import jnr.ffi.Struct;
 import jnr.ffi.types.*;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
@@ -194,7 +193,10 @@ public class LogFS extends FuseStubFS {
         Inode newInode = new Inode(inodeNumber);
         Inode.Handler newHandler = Inode.Sequential(
             handler,
-            Inode.SetOwner(getContext().uid.intValue(), getContext().gid.intValue())
+            Inode.SetOwner(getContext().uid.intValue(), getContext().gid.intValue()),
+            Inode.SetTimestamp("a"),
+            Inode.SetTimestamp("m"),
+            Inode.SetTimestamp("c")
         );
         newInode = newHandler.process(handler.process(newInode));
         write(newInode, dataBuffer, 0, dataBuffer.remaining());
@@ -407,7 +409,7 @@ public class LogFS extends FuseStubFS {
             this.inode = file.inode;
         }
 
-        protected boolean isDiretory() {
+        protected boolean isDirectory() {
             return (inode.mode & FileStat.S_IFDIR) != 0;
         }
 
@@ -418,14 +420,14 @@ public class LogFS extends FuseStubFS {
             stat.st_uid.set(inode.uid);
             stat.st_gid.set(inode.gid);
 
-            stat.st_ctim.tv_nsec.set(inode.lastChangeTime);
-            stat.st_atim.tv_nsec.set(inode.lastAccessTime);
-            stat.st_mtim.tv_nsec.set(inode.lastModifyTime);
+            stat.st_ctim.tv_sec.set(inode.lastChangeTime / 1000);
+            stat.st_atim.tv_sec.set(inode.lastAccessTime / 1000);
+            stat.st_mtim.tv_sec.set(inode.lastModifyTime / 1000);
         }
 
         protected void getattr(FileStat stat) {
             getattrCommon(stat);
-            if (!isDiretory())
+            if (!isDirectory())
                 stat.st_size.set(inode.size);
         }
 
@@ -583,7 +585,7 @@ public class LogFS extends FuseStubFS {
         logger.log("[INFO]: getattr, " + mountPoint + path);
         try{
             MemoryFile p = new MemoryFile(path);
-            if (p.isDiretory())
+            if (p.isDirectory())
                 p = new MemoryDirectory(p);
             p.getattr(stat);
             return 0;
@@ -697,7 +699,7 @@ public class LogFS extends FuseStubFS {
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.R_OK))
                 return -ErrorCodes.EACCES();
-            if (p.isDiretory()) {
+            if (p.isDirectory()) {
                 return -ErrorCodes.EISDIR();
             }
             int ret = p.read(buf, size, offset);
@@ -832,7 +834,7 @@ public class LogFS extends FuseStubFS {
                     return ret;
             }
             MemoryFile p = new MemoryFile(path);
-            if (p.isDiretory()) {
+            if (p.isDirectory()) {
                 return -ErrorCodes.EISDIR();
             }
             fi.fh.set(p.id);
@@ -846,7 +848,7 @@ public class LogFS extends FuseStubFS {
                     return ret;
                 try{
                     MemoryFile p = new MemoryFile(path);
-                    if (p.isDiretory()) {
+                    if (p.isDirectory()) {
                         return -ErrorCodes.EISDIR();
                     }
                     fi.fh.set(p.id);
@@ -868,7 +870,7 @@ public class LogFS extends FuseStubFS {
             MemoryFile p = new MemoryFile(path);
             if (!p.access(AccessConstants.W_OK))
                 return -ErrorCodes.EACCES();
-            if (p.isDiretory()) {
+            if (p.isDirectory()) {
                 return -ErrorCodes.EISDIR();
             }
             int ret = p.write(buf, size, offset);

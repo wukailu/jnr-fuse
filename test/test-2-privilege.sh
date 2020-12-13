@@ -5,36 +5,42 @@ error() {
 }
 rstr() {
   tr -dc A-Za-z0-9 </dev/urandom | head -c $1 ; echo ''
-#  cat /dev/urandom | head -n 10 | md5sum | head -c 10
-#  for j in $(seq 1 $1); do
-#    printf "%s" cat /dev/urandom | head -n 10 | md5sum | head -c 1
-#  done
-#  printf "\n"
 }
 
 ROOT="/tmp/mnt"
 cd $ROOT
 res1=$(pwd)
-if [ "$res1" != "/tmp/mnt" ]; then
+if [ "$res1" != "$ROOT" ]; then
     error
 fi
 
-TEST="test-1"
+TEST="test-2"
 echo "starting" $TEST
 
-if [ -d $TEST ]; then
-  rmdir $TEST || error
-fi
+echo rm -rf $TEST
+rm -rf $TEST || error
+echo mkdir $TEST
 mkdir $TEST || error
+echo cd $TEST
 cd $TEST || error
 
-# generate n different file
-for i in {1..40}; do
-  echo "case" $i
-  context=$(rstr $[$i * $i * $i * $i])"END"
-#  echo $context
-  echo "$context" > ${i}.txt || error
-  cmp -s <(echo "$context") ${i}.txt || error "result is not correct."
-done
+dir1="a"
+dir2="b"
+file1="x"
+file2="y"
+echo mkdir $dir1
+mkdir $dir1 || error
+echo mkdir $dir2
+mkdir $dir2 || error
+echo touch $file1
+touch $file1 || error
+echo touch $file2
+touch $file2 || error
+echo tree
+tree || error
+echo mv $file1 ${dir1}/${file1}
+mv $file1 ${dir1}/${file1} || error
+echo tree
+tree || error
 
 echo "Success!"

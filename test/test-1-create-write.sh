@@ -19,16 +19,14 @@ rstr() {
 ROOT="/tmp/mnt"
 cd $ROOT
 res1=$(pwd)
-if [ "$res1" != "/tmp/mnt" ]; then
+if [ "$res1" != "$ROOT" ]; then
     error
 fi
 
 TEST="test-1"
 echo "starting" $TEST
 
-if [ -d $TEST ]; then
-  rmdir $TEST || error
-fi
+rm -rf $TEST || error
 mkdir $TEST || error
 cd $TEST || error
 

@@ -217,6 +217,10 @@ public class Inode extends writableObject<Inode> {
         return new SetOwnerHandler(uid, gid);
     }
 
+    public static Handler SetTimestamp(String type){
+        return new SetTimestampHandler(type);
+    }
+
     public static class SequentialHandler extends Handler{
         private final Handler[] handlers;
         SequentialHandler(Handler... handlers){
@@ -244,6 +248,29 @@ public class Inode extends writableObject<Inode> {
         }
     }
 
+    public static class SetTimestampHandler extends Handler{
+        private final String type;
+        SetTimestampHandler(String type) {
+            assert type.equals("a") || type.equals("m") || type.equals("c");
+            this.type = type;
+        }
+
+        @Override
+        Inode process(Inode inode) {
+            switch (type) {
+                case "a":
+                    inode.lastAccessTime = System.currentTimeMillis();
+                    break;
+                case "m":
+                    inode.lastModifyTime = System.currentTimeMillis();
+                    break;
+                case "c":
+                    inode.lastChangeTime = System.currentTimeMillis();
+                    break;
+            }
+            return inode;
+        }
+    }
     public static class SetOwnerHandler extends Handler{
         private final int uid, gid;
         SetOwnerHandler(int uid, int gid){
