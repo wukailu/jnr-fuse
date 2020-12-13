@@ -4,7 +4,11 @@ error() {
   echo -n "Error! $1 || at "; caller; exit 1;
 }
 rstr() {
-  tr -dc A-Za-z0-9 </dev/urandom | head -c $1 ; echo ''
+  # random
+#  tr -dc A-Za-z0-9 </dev/urandom | head -c $1 ; echo ''
+  # deterministic
+  tr '\0' '\141' </dev/zero | head -c $1 ; echo ''
+#  openssl rand -base64 5000000
 #  cat /dev/urandom | head -n 10 | md5sum | head -c 10
 #  for j in $(seq 1 $1); do
 #    printf "%s" cat /dev/urandom | head -n 10 | md5sum | head -c 1
@@ -30,14 +34,11 @@ cd $TEST || error
 
 # generate n different file
 for i in {1..40}; do
-  echo try length $i
-  context=$(rstr $[$i * $i * $i * $i])
+  echo "case" $i
+  context=$(rstr $[$i * $i * $i * $i])"END"
 #  echo $context
-  echo $context > ${i}.txt || error
-  res2=$(cat ${i}.txt)
-  if [ "$res2" != "$context" ]; then
-    error "result is not correct."
-  fi
+  echo "$context" > ${i}.txt || error
+  cmp -s <(echo "$context") ${i}.txt || error "result is not correct."
 done
 
 echo "Success!"
