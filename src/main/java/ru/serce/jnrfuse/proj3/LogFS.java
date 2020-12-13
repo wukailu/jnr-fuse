@@ -396,6 +396,12 @@ public class LogFS extends FuseStubFS {
             return data.contents.containsKey(childName);
         }
 
+        protected MemoryFile getChild(String childName) throws Exception {
+            if (hasChild(childName))
+                return new MemoryFile(data.contents.get(childName));
+            throw new Exception(String.valueOf(-ErrorCodes.ENOENT()));
+        }
+
         @Override
         protected void flush(){
             if (data != null){
