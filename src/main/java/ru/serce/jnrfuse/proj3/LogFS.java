@@ -318,7 +318,7 @@ public class LogFS extends FuseStubFS {
         if ((node.mode & FileStat.S_IFDIR) != 0)
             return new DirectoryBlock().parse(read(node, 0, node.space));
         else
-            throw new Exception(String.valueOf(-ErrorCodes.ENOENT()));
+            throw new Exception(String.valueOf(-ErrorCodes.ENOTDIR()));
     }
 
     /***
@@ -396,6 +396,10 @@ public class LogFS extends FuseStubFS {
 
         protected boolean hasChild(String childName){
             return data.contents.containsKey(childName);
+        }
+
+        protected boolean isEmpty(){
+            return data.contents.isEmpty();
         }
 
         @Override
@@ -880,10 +884,14 @@ public class LogFS extends FuseStubFS {
         logger.log("[INFO]: rmdir, " + mountPoint + path);
         try{
             MemoryDirectory p = getParentDirectory(path);
-            if (!p.access(AccessConstants.W_OK))
-            {
+            MemoryDirectory f = new MemoryDirectory(path);
+            if (!p.access(AccessConstants.W_OK) || !f.access(AccessConstants.W_OK)){
                 operationEnd();
                 return -ErrorCodes.EACCES();
+            }
+            if (!f.isEmpty()){
+                operationEnd();
+                return -ErrorCodes.ENOTEMPTY();
             }
             p.delete(getLastComponent(path));
             p.flush();
