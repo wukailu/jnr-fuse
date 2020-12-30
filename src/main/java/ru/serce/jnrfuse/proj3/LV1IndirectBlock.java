@@ -43,7 +43,7 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
                 subBlockLen = i+1;
     }
 
-    // TODO: this part can be speed up
+
     public static ByteBuffer readBlocks(LogFS.MemoryManager manager, int startAddress, int len, int[] blocks){
         assert len > 0;
         ByteBuffer ret = ByteBuffer.allocate(len);

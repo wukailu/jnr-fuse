@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public class Inode extends writableObject<Inode> {
+    // TODO: WKL- Support garbage collection with call 'release' function.
     public int id;
     public int uid;
     public int gid;

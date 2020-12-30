@@ -3,6 +3,7 @@ package ru.serce.jnrfuse.proj3;
 import java.nio.ByteBuffer;
 
 public class Checkpoint extends writableObject<Checkpoint>{
+    // TODO: YSY- add a free block bitmap. Now a Checkpoint has 12.5KB data.
     public int lastInodeMap; // point to next block of last inode map
     public long beginTime;
     public long endTime;

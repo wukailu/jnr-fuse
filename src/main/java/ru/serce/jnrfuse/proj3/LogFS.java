@@ -73,6 +73,20 @@ public class LogFS extends FuseStubFS {
     }
 
     static class MemoryManager{
+        // TODO: YSY- Replace with a write-back memory cache, 4MB only, use any cache replacement policy.
+        // TODO: YSY- To support garbage collection, add a release function to mark a block as garbage.
+        // TODO: YSY- Check if this part is thread safe
+        // TODO: YSY- To implement garbage collection, we use two thread safe FIFO record all the free block address.
+        //  One only record old free space FIFO, one record real state.
+
+        public void sync(){
+
+        }
+
+        public void release(int address){
+
+        }
+
         private ByteBuffer mem;
         private int mark;
         MemoryManager(ByteBuffer mem, int mark){
@@ -91,6 +105,7 @@ public class LogFS extends FuseStubFS {
             return ret;
         }
 
+        // This is for checkpoint
         public int write_at(ByteBuffer data, int startAddress){
             mem.position(startAddress);
             mem.put(data);
@@ -98,6 +113,7 @@ public class LogFS extends FuseStubFS {
         }
 
         public ByteBuffer read(int startAddress, int len){
+            assert len % 1024 == 0;
             byte[] ret = new byte[len];
             mem.position(startAddress);
             mem.get(ret, 0, len);
@@ -258,7 +274,7 @@ public class LogFS extends FuseStubFS {
         return ret;
     }
 
-//  TODO: Add Notes.
+
     private boolean checkPrivilege(Inode inode, int mask) {
         int flag = (int) (inode.mode & 0x7);
         FuseContext context = getContext();
@@ -437,13 +453,13 @@ public class LogFS extends FuseStubFS {
             this.inode = file.inode;
         }
 
+        // TODO: ChenTong- Add a 'require lock' funcion and a 'release lock' function and use them in functions blow
+
         protected boolean isDirectory() {
             return (inode.mode & FileStat.S_IFDIR) != 0;
         }
 
-        // TODO: fix the permission later
         protected void getattrCommon(FileStat stat) {
-            // TODO: Fix bug here, which will lead to unable to see context in file.
             stat.st_mode.set(inode.mode);
             stat.st_uid.set(inode.uid);
             stat.st_gid.set(inode.gid);
