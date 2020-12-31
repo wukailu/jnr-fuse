@@ -40,7 +40,7 @@ for i in $(seq 1 $num); do
   child_process $i $c &
 done
 
-sleep $[$num / 10 + 2]
+sleep $[$num / 3 + 2]
 
 #cat x.txt || error
 res=$(cat x.txt) || error

@@ -47,7 +47,7 @@ public class LogFS extends FuseStubFS {
         this.total_size = mem.capacity();
         checkpoint1 = new Checkpoint();
         checkpoint2 = new Checkpoint();
-        checkpoint1.parse(mem, this.total_size - 13 * 1024, 13 * 1024);
+        checkpoint1.parse(mem, this.total_size - 26 * 1024, 13 * 1024);
         checkpoint2.parse(mem, this.total_size - 13 * 1024, 13 * 1024);
         if (checkpoint1.valid())
             checkpoint = checkpoint1;
@@ -55,6 +55,8 @@ public class LogFS extends FuseStubFS {
             checkpoint = checkpoint2;
         free = checkpoint.free;
         freeBlock = new LinkedList<Integer>();
+        for(int i = total_size / 1024 - 26; i < total_size / 1024; i++)
+            free.set(i);
         for(int i = 1; i < total_size / 1024; i++)
             if(!free.get(i))
                 freeBlock.add(i * 1024);
@@ -117,7 +119,7 @@ public class LogFS extends FuseStubFS {
 
         private void update(int address, ByteBuffer data)
         {
-            System.out.printf("Update: %d !!!\n",address);
+//            System.out.printf("Update: %d !!!\n",address);
             if(!free.get(address / blockSize))
                 return;
             memoryLock.unlock();
@@ -135,6 +137,7 @@ public class LogFS extends FuseStubFS {
             try {
                 RandomAccessFile out = new RandomAccessFile(file, "rw");
                 try {
+                    out.getFD().sync();
                     out.seek(address);
                     out.write(x);
                     out.close();
@@ -150,7 +153,7 @@ public class LogFS extends FuseStubFS {
 
         private ByteBuffer fetch(int address, int len)
         {
-            System.out.printf("Fetch: %d %d !!!\n",address,len);
+//            System.out.printf("Fetch: %d %d !!!\n",address,len);
             memoryLock.unlock();
             diskLock.lock();
             File file = new File(fileSystemName);
@@ -166,6 +169,7 @@ public class LogFS extends FuseStubFS {
             try {
                 RandomAccessFile in = new RandomAccessFile(file, "r");
                 try {
+                    in.getFD().sync();
                     in.seek(address);
                     in.read(x);
                     in.close();
@@ -295,7 +299,7 @@ public class LogFS extends FuseStubFS {
         }
 
         public void release(int address){
-            System.out.printf("Release: %d !!!\n",address);
+//            System.out.printf("Release: %d !!!\n",address);
             assert address % blockSize == 0;
             memoryLock.lock();
             free.set(address / blockSize, false);
@@ -317,13 +321,16 @@ public class LogFS extends FuseStubFS {
         }
 
         public ByteBuffer read(int startAddress, int len){
-            System.out.printf("Read: %d %d !!!\n",startAddress,len);
+//            System.out.printf("Read: %d %d !!!\n",startAddress,len);
             assert len <= blockSize;
             memoryLock.lock();
             ByteBuffer ret = get(startAddress);
             memoryLock.unlock();
-            ret.limit(len);
-            return ret;
+            byte[] x = ret.array();
+            byte[] y = new byte[len];
+            for(int i = 0; i < len; i++)
+                y[i] = x[i];
+            return ByteBuffer.wrap(y);
         }
     }
 
