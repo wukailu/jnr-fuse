@@ -22,6 +22,8 @@ import java.util.concurrent.locks.*;
 import static jnr.ffi.Platform.OS.WINDOWS;
 
 public class LogFS extends FuseStubFS {
+    private static final String fileSystemName = "LFS";
+
     MemoryManager manager;
     private int inodeCnt;
     /* The total size of FS, counted in Byte */
@@ -31,11 +33,13 @@ public class LogFS extends FuseStubFS {
     private Map<Integer, Integer> oldInodeMap, newInodeMap;
 
     public final FileLock fileLock = new FileLock();
-    private Lock lock;
+
+    private BitSet free;
+    private Queue<Integer> freeBlock;
+    private int numUpdateBlock;
 
     LogFS(int total_size){
         this(ByteBuffer.allocate(total_size));
-        lock = new ReentrantLock();
     }
 
     // Load from existing mem
@@ -43,13 +47,18 @@ public class LogFS extends FuseStubFS {
         this.total_size = mem.capacity();
         checkpoint1 = new Checkpoint();
         checkpoint2 = new Checkpoint();
-        checkpoint1.parse(mem, this.total_size-2048, 1024);
-        checkpoint2.parse(mem, this.total_size-1024, 1024);
+        checkpoint1.parse(mem, this.total_size - 13 * 1024, 13 * 1024);
+        checkpoint2.parse(mem, this.total_size - 13 * 1024, 13 * 1024);
         if (checkpoint1.valid())
             checkpoint = checkpoint1;
         else
             checkpoint = checkpoint2;
-        this.manager = new MemoryManager(mem, checkpoint.lastInodeMap + 1024);
+        free = checkpoint.free;
+        freeBlock = new LinkedList<Integer>();
+        for(int i = 1; i < total_size / 1024; i++)
+            if(!free.get(i))
+                freeBlock.add(i);
+        this.manager = new MemoryManager();
         oldInodeMap = new HashMap<Integer, Integer>();
         newInodeMap = new HashMap<Integer, Integer>();
         inodeCnt = 0;
@@ -70,65 +79,243 @@ public class LogFS extends FuseStubFS {
         if (inodeCnt == 0){ // create "/"
             createDirectory(0777, Inode.Identity);
         }
-        lock = new ReentrantLock();
     }
 
 
+    class MemoryManager{
 
-    static class MemoryManager{
-        // TODO: YSY- Replace with a write-back memory cache, 4MB only, use any cache replacement policy.
-        // TODO: YSY- To support garbage collection, add a release function to mark a block as garbage.
-        // TODO: YSY- Check if this part is thread safe
-        // TODO: YSY- To implement garbage collection, we use two thread safe FIFO record all the free block address.
-        //  One only record old free space FIFO, one record real state.
+        private static final int cacheSize = 2048, cacheWay = 4, blockSize = 1024;
+
+        private ByteBuffer[] data;
+        private int[] tag;
+        private boolean[] valid, dirty;
+        private Lock memoryLock, diskLock;
+
+        MemoryManager(){
+            data = new ByteBuffer[cacheSize];
+            tag = new int[cacheSize];
+            valid = new boolean[cacheSize];
+            dirty = new boolean[cacheSize];
+            memoryLock = new ReentrantLock();
+            diskLock = new ReentrantLock();
+        }
+
+        private int getIndex(int address)
+        {
+            return (address / blockSize) & (cacheSize / cacheWay - 1);
+        }
+
+        private int getTag(int address)
+        {
+            return address / blockSize / (cacheSize / cacheWay);
+        }
+
+        private int getAddress(int tag, int index)
+        {
+            return (tag * (cacheSize / cacheWay) + index) * blockSize;
+        }
+
+        private void update(int address, ByteBuffer data)
+        {
+            if(!free.get(address / blockSize))
+                return;
+            memoryLock.unlock();
+            diskLock.lock();
+            File file = new File(fileSystemName);
+            if (!file.exists())
+            {
+                try {
+                    file.createNewFile();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            byte[] x = data.array();
+            try {
+                RandomAccessFile out = new RandomAccessFile(file, "rw");
+                try {
+                    out.seek(address);
+                    out.write(x);
+                    out.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }
+            diskLock.unlock();
+            memoryLock.lock();
+        }
+
+        private ByteBuffer fetch(int address, int len)
+        {
+            memoryLock.unlock();
+            diskLock.lock();
+            File file = new File(fileSystemName);
+            if (!file.exists())
+            {
+                try {
+                    file.createNewFile();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            byte[] x = new byte[len];
+            try {
+                RandomAccessFile in = new RandomAccessFile(file, "r");
+                try {
+                    in.seek(address);
+                    in.read(x);
+                    in.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }
+            diskLock.unlock();
+            memoryLock.lock();
+            return ByteBuffer.wrap(x);
+        }
+
+        private void put(int address, ByteBuffer data_, boolean dirty_)
+        {
+            int index = getIndex(address), tag_ = getTag(address);
+            for(int i = 0; i < cacheWay; i++)
+                if(!valid[index * cacheWay + i])
+                {
+                    data[index * cacheWay + i] = data_;
+                    tag[index * cacheWay + i] = tag_;
+                    valid[index * cacheWay + i] = true;
+                    dirty[index * cacheWay + i] = dirty_;
+                    return;
+                }
+            int i = (int) (Math.random() * cacheWay);
+            if(!dirty[index * cacheWay + i])
+            {
+                data[index * cacheWay + i] = data_;
+                tag[index * cacheWay + i] = tag_;
+                valid[index * cacheWay + i] = true;
+                dirty[index * cacheWay + i] = dirty_;
+            }
+            else
+            {
+                int a = getAddress(tag[index * cacheWay + i], index);
+                ByteBuffer d = data[index * cacheWay + i];
+                data[index * cacheWay + i] = data_;
+                tag[index * cacheWay + i] = tag_;
+                valid[index * cacheWay + i] = true;
+                dirty[index * cacheWay + i] = dirty_;
+                update(a,d);
+            }
+        }
+
+        private ByteBuffer get(int address)
+        {
+            int index = getIndex(address), tag_ = getTag(address);
+            for(int i = 0; i < cacheWay; i++)
+                if(valid[index * cacheWay + i] && tag[index * cacheWay + i] == tag_)
+                    return data[index * cacheWay + i];
+            ByteBuffer data_ = fetch(address, 1024);
+            for(int i = 0; i < cacheWay; i++)
+                if(valid[index * cacheWay + i] && tag[index * cacheWay + i] == tag_)
+                    return data[index * cacheWay + i];
+            put(address, data_, false);
+            return data_;
+        }
+
+        private void updateInodeMap()
+        {
+            oldInodeMap.putAll(newInodeMap);
+            newInodeMap = new HashMap<Integer, Integer>();
+            InodeMap m = new InodeMap();
+            m.preInodeMapAddress = 0;
+            int p = 0;
+            for (Map.Entry<Integer, Integer> e : oldInodeMap.entrySet())
+            {
+                m.inodeMap.put(e.getKey(), e.getValue());
+                if (m.size() == 127)
+                {
+                    assert !freeBlock.isEmpty();
+                    p = freeBlock.remove();
+                    free.set(p / blockSize);
+                    update(p, m.flush());
+                    m = new InodeMap();
+                    m.preInodeMapAddress = p;
+                }
+            }
+            if (m.size() > 0)
+            {
+                assert !freeBlock.isEmpty();
+                p = freeBlock.remove();
+                free.set(p / blockSize);
+                update(p, m.flush());
+            }
+            int lastInodeMap = checkpoint.lastInodeMap;
+            while (lastInodeMap > 0){
+                free.set(lastInodeMap / blockSize, false);
+                freeBlock.add(lastInodeMap);
+                InodeMap inodeMap = new InodeMap().parse(fetch(lastInodeMap, 1024), 0, 1024);
+                lastInodeMap = inodeMap.preInodeMapAddress;
+            }
+            checkpoint.updateLastInodeMap(p);
+        }
+
+        private void updateFreeList()
+        {
+            checkpoint.updateFreeList(free);
+        }
 
         public void sync(){
-
+            memoryLock.lock();
+            if(numUpdateBlock == 0)
+            {
+                memoryLock.unlock();
+                return;
+            }
+            numUpdateBlock = 0;
+            updateInodeMap();
+            updateFreeList();
+            for(int i = 0; i < cacheSize; i++)
+                if(valid[i] && dirty[i])
+                {
+                    int a = getAddress(tag[i], i / cacheWay);
+                    ByteBuffer d = data[i];
+                    dirty[i] = false;
+                    update(a,d);
+                }
+            update(total_size - 26 * 1024, checkpoint.flush());
+            update(total_size - 13 * 1024, checkpoint.flush());
+            memoryLock.unlock();
         }
 
         public void release(int address){
-
-        }
-
-        private ByteBuffer mem;
-        private int mark;
-        MemoryManager(ByteBuffer mem, int mark){
-            this.mem = mem;
-            this.mark = mark;
+            assert address % blockSize == 0;
+            memoryLock.lock();
+            free.set(address / blockSize, false);
+            freeBlock.add(address);
+            memoryLock.unlock();
         }
 
         public int write(ByteBuffer data){
-            int ret = mark;
-            mem.position(mark);
-            mem.put(data);
-            if(mem.position()%1024 != 0)
-                mark = (mem.position()/1024 + 1) * 1024;
-            else
-                mark = mem.position();
-            return ret;
-        }
-
-        // This is for checkpoint
-        public int write_at(ByteBuffer data, int startAddress){
-            mem.position(startAddress);
-            mem.put(data);
-            return startAddress;
+            assert data.capacity() == blockSize;
+            memoryLock.lock();
+            assert !freeBlock.isEmpty();
+            int address = freeBlock.remove();
+            free.set(address / blockSize);
+            put(address, data, true);
+            numUpdateBlock++;
+            memoryLock.unlock();
+            return address;
         }
 
         public ByteBuffer read(int startAddress, int len){
-            assert len % 1024 == 0;
-            byte[] ret = new byte[len];
-            mem.position(startAddress);
-            mem.get(ret, 0, len);
-            return ByteBuffer.wrap(ret);
-        }
-
-        public byte[] toBytes(){
-            return mem.array();
-        }
-
-        public int getMark(){
-            return mark;
+            assert len <= blockSize;
+            memoryLock.lock();
+            ByteBuffer ret = get(startAddress);
+            memoryLock.unlock();
+            ret.limit(len);
+            return ret;
         }
     }
 
@@ -160,72 +347,16 @@ public class LogFS extends FuseStubFS {
         return y;
     }
 
-    private int updateInodeMap()
-    {
-        int p = checkpoint.lastInodeMap, q = p + 1024;
-        InodeMap m = new InodeMap();
-        m.preInodeMapAddress = p;
-        for (Map.Entry<Integer, Integer> e : newInodeMap.entrySet())
-        {
-            m.inodeMap.put(e.getKey(), e.getValue());
-            if (m.size() == 127)
-            {
-                p = manager.write(m.flush());
-                m = new InodeMap();
-                m.preInodeMapAddress = p;
-            }
-        }
-        if (m.size() > 0)
-            p = manager.write(m.flush());
-        oldInodeMap.putAll(newInodeMap);
-        newInodeMap = new HashMap<Integer, Integer>();
-        checkpoint.update(p);
-        manager.write_at(checkpoint.flush(), total_size-2048);
-        manager.write_at(checkpoint.flush(), total_size-1024);
-//        System.out.println(checkpoint.lastInodeMap);
-        return q;
-    }
-
-    private void writeToDisk(String s)
-    {
-        if (newInodeMap.isEmpty())
-            return;
-        int p = updateInodeMap();
-        File file = new File(s);
-        if (!file.exists())
-        {
-            try {
-                file.createNewFile();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        byte[] x = manager.toBytes();
-        try {
-            RandomAccessFile out = new RandomAccessFile(file, "rw");
-            try {
-                out.seek(p);
-                out.write(x,p,manager.getMark()-p);
-                out.seek(total_size-2048);
-                out.write(x,total_size-2048,2048);
-                //out.write(x,0,1024*1024*100);
-                out.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-    }
-
     /***
      * @param inode The inode number
      * @return  Return the Address of the start of the inode, e.g. 0x18237c00.
      */
     private int getInodeAddress(int inode) throws Exception {
+        manager.memoryLock.lock();
         Object ret = newInodeMap.get(inode);
         if (ret == null)
             ret = oldInodeMap.get(inode);
+        manager.memoryLock.unlock();
         if (ret == null)
             throw new Exception("Inode not found in Inode Map!");
         return (int) ret;
@@ -237,7 +368,7 @@ public class LogFS extends FuseStubFS {
      * @param handler       The handler for inode, e.g. modify mode or some value else.
      * @return              The inode of the new inode
      */
-    private Inode createInode(ByteBuffer dataBuffer, Inode.Handler handler){
+    private synchronized Inode createInode(ByteBuffer dataBuffer, Inode.Handler handler){
         int inodeNumber = ++inodeCnt;
         Inode newInode = new Inode(inodeNumber);
         Inode.Handler newHandler = Inode.Sequential(
@@ -273,7 +404,9 @@ public class LogFS extends FuseStubFS {
      */
     private synchronized int update(Inode node){
         int ret = manager.write(node.flush());
+        manager.memoryLock.lock();
         newInodeMap.put(node.id, ret);
+        manager.memoryLock.unlock();
         return ret;
     }
 
@@ -652,12 +785,11 @@ public class LogFS extends FuseStubFS {
     }
 
     public static void main(String[] args) {
-        ByteBuffer x = readFromDisk("LFS");
+        ByteBuffer x = readFromDisk(fileSystemName);
         LogFS memfs = new LogFS(x);
         //memfs.pretty_print();
         //memfs.selfTest();
         //memfs.selfTest2();
-        //memfs.writeToDisk("LFS");
         try {
             String path;
             if (Platform.getNativePlatform().getOS() == WINDOWS) {
@@ -737,14 +869,12 @@ public class LogFS extends FuseStubFS {
 
     private void operationBegin()
     {
-//        lock.lock();
     }
 
     private void operationEnd()
     {
-        if (manager.getMark() - checkpoint.lastInodeMap > 1024 * 1024)
-            writeToDisk("LFS");
-//        lock.unlock();
+        if(numUpdateBlock >= 1024)
+            manager.sync();
     }
 
     public void close(MemoryFile p) {
@@ -1292,14 +1422,14 @@ public class LogFS extends FuseStubFS {
     @Override
     public int fsync(String path, int isdatasync, FuseFileInfo fi) {
         logger.log("[INFO]: fsync, " + path + ", " + isdatasync + ", " + fi);
-        writeToDisk("LFS");
+        manager.sync();
         return 0;
     }
 
     @Override
     public int fsyncdir(String path, FuseFileInfo fi) {
         logger.log("[INFO]: fsyncdir, " + path + ", " + fi);
-        writeToDisk("LFS");
+        manager.sync();
         return 0;
     }
 }
