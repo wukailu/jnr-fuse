@@ -325,6 +325,7 @@ public class LogFS extends FuseStubFS {
         return currentInode;
     }
 
+    // TODO: Kailu- Add inode address into inode, whenever update a inode, delete the old one.
     /***
      * The Inode Object of a inode id. you must obtain a read lock before calling this function!!
      * @param id Inode ID.
@@ -365,7 +366,7 @@ public class LogFS extends FuseStubFS {
      * @param size          The size of data need to write to disk in buffer.
      */
     private synchronized void write(Inode node, ByteBuffer buffer, int writeOffset, int size) {
-        node.write(buffer, manager, writeOffset, size);
+        node.write(buffer, manager, writeOffset, size, false);
         update(node);
     }
 
@@ -581,8 +582,7 @@ public class LogFS extends FuseStubFS {
 
         protected synchronized void truncate(int size) {
             if (size < inode.size) {
-                LogFS.this.write(inode, ByteBuffer.allocate(inode.size - size), size, inode.size - size);
-                inode.updateSize((int) size);
+                inode.truncate(manager, size);
             }
         }
 
