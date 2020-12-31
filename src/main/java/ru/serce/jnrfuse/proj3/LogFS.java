@@ -57,7 +57,7 @@ public class LogFS extends FuseStubFS {
         freeBlock = new LinkedList<Integer>();
         for(int i = 1; i < total_size / 1024; i++)
             if(!free.get(i))
-                freeBlock.add(i);
+                freeBlock.add(i * 1024);
         this.manager = new MemoryManager();
         oldInodeMap = new HashMap<Integer, Integer>();
         newInodeMap = new HashMap<Integer, Integer>();
@@ -117,6 +117,7 @@ public class LogFS extends FuseStubFS {
 
         private void update(int address, ByteBuffer data)
         {
+            System.out.printf("Update: %d !!!\n",address);
             if(!free.get(address / blockSize))
                 return;
             memoryLock.unlock();
@@ -149,6 +150,7 @@ public class LogFS extends FuseStubFS {
 
         private ByteBuffer fetch(int address, int len)
         {
+            System.out.printf("Fetch: %d %d !!!\n",address,len);
             memoryLock.unlock();
             diskLock.lock();
             File file = new File(fileSystemName);
@@ -180,6 +182,8 @@ public class LogFS extends FuseStubFS {
 
         private void put(int address, ByteBuffer data_, boolean dirty_)
         {
+//            update(address, data_);
+//            return;
             int index = getIndex(address), tag_ = getTag(address);
             for(int i = 0; i < cacheWay; i++)
                 if(!valid[index * cacheWay + i])
@@ -212,11 +216,12 @@ public class LogFS extends FuseStubFS {
 
         private ByteBuffer get(int address)
         {
+//            return fetch(address, blockSize);
             int index = getIndex(address), tag_ = getTag(address);
             for(int i = 0; i < cacheWay; i++)
                 if(valid[index * cacheWay + i] && tag[index * cacheWay + i] == tag_)
                     return data[index * cacheWay + i];
-            ByteBuffer data_ = fetch(address, 1024);
+            ByteBuffer data_ = fetch(address, blockSize);
             for(int i = 0; i < cacheWay; i++)
                 if(valid[index * cacheWay + i] && tag[index * cacheWay + i] == tag_)
                     return data[index * cacheWay + i];
@@ -290,6 +295,7 @@ public class LogFS extends FuseStubFS {
         }
 
         public void release(int address){
+            System.out.printf("Release: %d !!!\n",address);
             assert address % blockSize == 0;
             memoryLock.lock();
             free.set(address / blockSize, false);
@@ -306,10 +312,12 @@ public class LogFS extends FuseStubFS {
             put(address, data, true);
             numUpdateBlock++;
             memoryLock.unlock();
+            System.out.printf("Write: %d !!!\n",address);
             return address;
         }
 
         public ByteBuffer read(int startAddress, int len){
+            System.out.printf("Read: %d %d !!!\n",startAddress,len);
             assert len <= blockSize;
             memoryLock.lock();
             ByteBuffer ret = get(startAddress);
