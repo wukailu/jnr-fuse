@@ -582,8 +582,7 @@ public class LogFS extends FuseStubFS {
 
         protected synchronized void truncate(int size) {
             if (size < inode.size) {
-                LogFS.this.write(inode, ByteBuffer.allocate(inode.size - size), size, inode.size - size);
-                inode.updateSize((int) size);
+                inode.truncate(manager, size);
             }
         }
 
