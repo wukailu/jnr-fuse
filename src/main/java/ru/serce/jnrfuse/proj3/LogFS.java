@@ -1137,7 +1137,7 @@ public class LogFS extends FuseStubFS {
             close(p);
             f = new MemoryFile(fid, 1);
             f.inode.hardLinks -= 1;
-            // TODO: if the number of hardlinks is zero, then delete this file
+            // TODO: WKL- if the number of hardlinks is zero, then delete this file
             f.flush();
             close(f);
             operationEnd();
