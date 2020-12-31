@@ -6,7 +6,6 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public class Inode extends writableObject<Inode> {
-    // TODO: WKL- Support garbage collection with call 'release' function.
     public int id;
     public int uid;
     public int gid;
@@ -104,11 +103,9 @@ public class Inode extends writableObject<Inode> {
         System.out.printf("-------------- end --------------\n\n");
     }
 
-    public void clearData(){
-        Arrays.fill(dataBlocks, 0);
-        Arrays.fill(lv1Block, 0);
-        Arrays.fill(lv2Block, 0);
-        updateSize(0);
+    public void truncate(LogFS.MemoryManager manager, int size){
+        // TODO: implement this part
+        updateSize(size);
     }
 
     /***

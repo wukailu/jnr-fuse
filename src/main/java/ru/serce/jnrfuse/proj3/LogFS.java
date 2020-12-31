@@ -421,7 +421,7 @@ public class LogFS extends FuseStubFS {
         @Override
         protected void flush(){
             if (data != null){
-                inode.clearData();
+                inode.truncate(manager, 0);
                 ByteBuffer buffer = data.flush();
                 LogFS.this.write(inode, buffer, 0, buffer.remaining());
             }
