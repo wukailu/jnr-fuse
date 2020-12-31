@@ -86,11 +86,27 @@ public class Inode extends writableObject<Inode> {
         return this;
     }
 
-    public void clearData(){
-        Arrays.fill(dataBlocks, 0);
-        Arrays.fill(lv1Block, 0);
-        Arrays.fill(lv2Block, 0);
-        updateSize(0);
+    public void pretty_print()
+    {
+        System.out.printf("---------- inode block ----------\n");
+        System.out.printf("id: %d\n",id);
+        System.out.printf("uid: %d\n",uid);
+        System.out.printf("gid: %d\n",gid);
+        System.out.printf("mode: %d\n",mode);
+        System.out.printf("last access time: %d\n",lastAccessTime);
+        System.out.printf("last modify time: %d\n",lastModifyTime);
+        System.out.printf("last change time: %d\n",lastChangeTime);
+        System.out.printf("create time: %d\n",createTime);
+        System.out.printf("space: %d\n",space);
+        System.out.printf("size: %d\n",size);
+        System.out.printf("hard links: %d\n",hardLinks);
+        System.out.printf("-------------- end --------------\n\n");
+    }
+
+    public void truncate(LogFS.MemoryManager manager, int size){
+        ByteBuffer empty = ByteBuffer.allocate(this.space - size);
+        write(empty, manager, size, this.space - size, true);
+        updateSize(size);
     }
 
     /***
@@ -146,14 +162,16 @@ public class Inode extends writableObject<Inode> {
      *                      Should be smaller than file size.
      * @param len   The size of bytes to write, started from data.position().
      */
-    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len){
+    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, boolean isTruncate){
+        if (startAddress > size && isTruncate)
+            return;
         if (startAddress > size)
-            write(ByteBuffer.allocate(startAddress-size), manager, size, startAddress-size);
+            write(ByteBuffer.allocate(startAddress-size), manager, size, startAddress-size, false);
 
         updateSize(Math.max(size, startAddress + len));
 
         if (startAddress < dataBlocks.length * 1024){
-            LV1IndirectBlock.writeBlocks(data, manager, startAddress, len, dataBlocks);
+            LV1IndirectBlock.writeBlocks(data, manager, startAddress, len, dataBlocks, isTruncate);
             len -= Math.min(len, dataBlocks.length * 1024 - startAddress);
             startAddress = 0;
         }else{
@@ -161,7 +179,7 @@ public class Inode extends writableObject<Inode> {
         }
 
         if (startAddress < lv1Block.length * 1024 * 256){
-            LV2IndirectBlock.writeLv1Blocks(data, manager, startAddress, len, lv1Block);
+            LV2IndirectBlock.writeLv1Blocks(data, manager, startAddress, len, lv1Block, isTruncate);
             len -= Math.min(len, lv1Block.length * 1024 * 256 - startAddress);
             startAddress = 0;
         }else{
@@ -175,11 +193,19 @@ public class Inode extends writableObject<Inode> {
                     LV2IndirectBlock indirectBlock = new LV2IndirectBlock();
                     if (lv2 != 0){
                         indirectBlock.parse(manager.read(lv2, 1024));
+                        manager.release(lv2);
+                    }else if (isTruncate){
+                        len -= Math.min(len, 1024 * 256 * 256 - startAddress);
+                        startAddress = 0;
+                        continue;
                     }
-                    indirectBlock.write(data, manager, startAddress, len);
+                    indirectBlock.write(data, manager, startAddress, len, isTruncate);
+                    if (!isTruncate || indirectBlock.getSize(manager) != 0)
+                        lv2Block[i] = manager.write(indirectBlock.flush());
+                    else
+                        lv2Block[i] = 0;
                     len -= Math.min(len, 1024 * 256 * 256 - startAddress);
                     startAddress = 0;
-                    lv2Block[i] = manager.write(indirectBlock.flush());
                 }else {
                     startAddress -= 1024 * 256 * 256;
                 }
