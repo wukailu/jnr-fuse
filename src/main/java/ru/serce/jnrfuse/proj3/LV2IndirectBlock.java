@@ -10,17 +10,17 @@ public class LV2IndirectBlock extends LV1IndirectBlock {
     }
 
     @Override
-    public int getSize(ByteBuffer mem) {
+    public int getSize(LogFS.MemoryManager manager) {
         int last = subBlockLen - 1;
         if (last == -1) return 0;
-        int others = new LV1IndirectBlock().parse(mem, subBlocks[last], 1024).getSize(mem);
+        int others = new LV1IndirectBlock().parse(manager.read(subBlocks[last], 1024)).getSize(manager);
         return last * 1024 * subBlocks.length + others;
     }
 
     @Override
-    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len) {
+    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, boolean isTruncate) {
         if (len <= 0) return;
-        writeLv1Blocks(data, manager, startAddress, len, subBlocks);
+        writeLv1Blocks(data, manager, startAddress, len, subBlocks, isTruncate);
         for (int i = 0; i < subBlocks.length; i++)
             if (subBlocks[i] != 0)
                 subBlockLen = i+1;
@@ -46,7 +46,7 @@ public class LV2IndirectBlock extends LV1IndirectBlock {
         return ret;
     }
 
-    public static void writeLv1Blocks(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, int[] lv1blocks){
+    public static void writeLv1Blocks(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, int[] lv1blocks, boolean isTruncate){
         for (int i = 0; i < lv1blocks.length; i++) {
             int lv1 = lv1blocks[i];
             if(len > 0){
@@ -54,12 +54,21 @@ public class LV2IndirectBlock extends LV1IndirectBlock {
                     LV1IndirectBlock indirectBlock = new LV1IndirectBlock();
                     if (lv1 != 0){
                         indirectBlock.parse(manager.read(lv1, 1024));
+                        manager.release(lv1);
+                    }else if (isTruncate){
+                        len -= Math.min(len, 1024 * 256 - startAddress);
+                        startAddress = 0;
+                        continue;
                     }
-                    indirectBlock.write(data, manager, startAddress, len);
+
+                    indirectBlock.write(data, manager, startAddress, len, isTruncate);
+                    if (!isTruncate || indirectBlock.getSize(manager) != 0)
+                        lv1blocks[i] = manager.write(indirectBlock.flush());
+                    else
+                        lv1blocks[i] = 0;
+
                     len -= Math.min(len, 1024 * 256 - startAddress);
                     startAddress = 0;
-
-                    lv1blocks[i] = manager.write(indirectBlock.flush());
                 }else {
                     startAddress -= 1024 * 256;
                 }

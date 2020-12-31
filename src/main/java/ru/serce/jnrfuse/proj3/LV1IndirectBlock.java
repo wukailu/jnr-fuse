@@ -35,9 +35,9 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
         return readBlocks(manager, startAddress, len, subBlocks);
     }
 
-    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len){
+    public void write(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, boolean isTruncate){
         if (len <= 0) return;
-        writeBlocks(data, manager, startAddress, len, subBlocks);
+        writeBlocks(data, manager, startAddress, len, subBlocks, isTruncate);
         for (int i = 0; i < subBlocks.length; i++)
             if (subBlocks[i] != 0)
                 subBlockLen = i+1;
@@ -64,7 +64,7 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
         return ret;
     }
 
-    public static void writeBlocks(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, int[] blocks){
+    public static void writeBlocks(ByteBuffer data, LogFS.MemoryManager manager, int startAddress, int len, int[] blocks, boolean isTruncate){
         if(len == 0)
             return;
         for (int i = 0; i < blocks.length; i++) {
@@ -73,12 +73,23 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
                 startAddress -= 1024;
             else {
                 DataBlock d = new DataBlock();
+                if (block != 0) {
+                    if (startAddress != 0 || len < 1024) {
+                        d.parse(manager.read(block, 1024));
+                    }
+                    manager.release(block);
+                }else if (isTruncate){
+                    len -= Math.min(len, 1024 - startAddress);
+                    startAddress = 0;
+                    continue;
+                }
 
-                if (block != 0 && !(startAddress == 0 && len >= 1024))
-                    d.parse(manager.read(block, 1024));
                 data.get(d.data, startAddress, Math.min(len, 1024 - startAddress));
 
-                blocks[i] = manager.write(d.flush());
+                if (!isTruncate || startAddress != 0 || len < 1024)
+                    blocks[i] = manager.write(d.flush());
+                else
+                    blocks[i] = 0;
                 len -= Math.min(len, 1024 - startAddress);
                 startAddress = 0;
             }
@@ -87,7 +98,7 @@ public class LV1IndirectBlock extends writableObject<LV1IndirectBlock> {
         }
     }
 
-    public int getSize(ByteBuffer mem){
+    public int getSize(LogFS.MemoryManager manager){
         return subBlockLen * 1024;
     }
 }
