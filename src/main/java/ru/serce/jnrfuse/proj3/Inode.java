@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public class Inode extends writableObject<Inode> {
+    public int address;
     public int id;
     public int uid;
     public int gid;
@@ -23,7 +24,8 @@ public class Inode extends writableObject<Inode> {
 
 
 
-    Inode(int id){
+    Inode(int id, int address){
+        this.address = address;
         this.id = id;
         uid = 0;
         gid = 0;

@@ -92,6 +92,7 @@ public class LogFS extends FuseStubFS {
         private int[] tag;
         private boolean[] valid, dirty;
         private Lock memoryLock, diskLock;
+        RandomAccessFile rafile;
 
         MemoryManager(){
             data = new ByteBuffer[cacheSize];
@@ -100,6 +101,20 @@ public class LogFS extends FuseStubFS {
             dirty = new boolean[cacheSize];
             memoryLock = new ReentrantLock();
             diskLock = new ReentrantLock();
+            File file = new File(fileSystemName);
+            try{
+                if (!file.exists())
+                {
+                    try {
+                        file.createNewFile();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+                rafile = new RandomAccessFile(file, "rw");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
 
         private int getIndex(int address)
@@ -124,27 +139,11 @@ public class LogFS extends FuseStubFS {
                 return;
             memoryLock.unlock();
             diskLock.lock();
-            File file = new File(fileSystemName);
-            if (!file.exists())
-            {
-                try {
-                    file.createNewFile();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
             byte[] x = data.array();
             try {
-                RandomAccessFile out = new RandomAccessFile(file, "rw");
-                try {
-                    out.getFD().sync();
-                    out.seek(address);
-                    out.write(x);
-                    out.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            } catch (FileNotFoundException e) {
+                rafile.seek(address);
+                rafile.write(x);
+            } catch (Exception e) {
                 e.printStackTrace();
             }
             diskLock.unlock();
@@ -153,41 +152,24 @@ public class LogFS extends FuseStubFS {
 
         private ByteBuffer fetch(int address, int len)
         {
-//            System.out.printf("Fetch: %d %d !!!\n",address,len);
             memoryLock.unlock();
             diskLock.lock();
-            File file = new File(fileSystemName);
-            if (!file.exists())
-            {
-                try {
-                    file.createNewFile();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
+            Long startTime = System.nanoTime();
             byte[] x = new byte[len];
             try {
-                RandomAccessFile in = new RandomAccessFile(file, "r");
-                try {
-                    in.getFD().sync();
-                    in.seek(address);
-                    in.read(x);
-                    in.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            } catch (FileNotFoundException e) {
+                rafile.seek(address);
+                rafile.read(x);
+            } catch (Exception e) {
                 e.printStackTrace();
             }
             diskLock.unlock();
+            System.out.println("Time until read finish, " + (System.nanoTime()-startTime));
             memoryLock.lock();
             return ByteBuffer.wrap(x);
         }
 
         private void put(int address, ByteBuffer data_, boolean dirty_)
         {
-//            update(address, data_);
-//            return;
             int index = getIndex(address), tag_ = getTag(address);
             for(int i = 0; i < cacheWay; i++)
                 if(!valid[index * cacheWay + i])
@@ -295,6 +277,11 @@ public class LogFS extends FuseStubFS {
                 }
             update(total_size - 26 * 1024, checkpoint.flush());
             update(total_size - 13 * 1024, checkpoint.flush());
+            try {
+                rafile.getFD().sync();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             memoryLock.unlock();
         }
 
@@ -385,7 +372,7 @@ public class LogFS extends FuseStubFS {
      */
     private synchronized Inode createInode(ByteBuffer dataBuffer, Inode.Handler handler){
         int inodeNumber = ++inodeCnt;
-        Inode newInode = new Inode(inodeNumber);
+        Inode newInode = new Inode(inodeNumber, 0);
         Inode.Handler newHandler = Inode.Sequential(
             handler,
             Inode.SetOwner(getContext().uid.intValue(), getContext().gid.intValue()),
@@ -418,7 +405,10 @@ public class LogFS extends FuseStubFS {
      * @return          The new address on disk where it write to.
      */
     private synchronized int update(Inode node){
+        if (node.address != 0)
+            manager.release(node.address);
         int ret = manager.write(node.flush());
+        node.address = ret;
         manager.memoryLock.lock();
         newInodeMap.put(node.id, ret);
         manager.memoryLock.unlock();
@@ -473,14 +463,13 @@ public class LogFS extends FuseStubFS {
         return currentInode;
     }
 
-    // TODO: Kailu- Add inode address into inode, whenever update a inode, delete the old one.
     /***
      * The Inode Object of a inode id. you must obtain a read lock before calling this function!!
      * @param id Inode ID.
      * @return  The Inode.
      */
     private Inode inodeOf(int id) throws Exception {
-        return new Inode(id).parse(manager.read(getInodeAddress(id), 1024));
+        return new Inode(id, getInodeAddress(id)).parse(manager.read(getInodeAddress(id), 1024));
     }
 
     /***
@@ -681,7 +670,7 @@ public class LogFS extends FuseStubFS {
         }
 
         public void close() {
-            if (acquired == true) {
+            if (acquired) {
                 release();
                 acquired = false;
             }
@@ -748,6 +737,13 @@ public class LogFS extends FuseStubFS {
                 update(inode);
             }
         }
+
+        protected void delete(){
+            if (this.inode != null){
+                this.inode.truncate(manager,0);
+                manager.release(this.inode.address);
+            }
+        }
     }
 
     private MemoryDirectory getParentDirectory(String path, int lockLevel) throws Exception {
@@ -786,7 +782,7 @@ public class LogFS extends FuseStubFS {
             m.putAll(newInodeMap);
             for (Integer x : m.values())
             {
-                Inode i = new Inode(0).parse(manager.read(x, 1024));
+                Inode i = new Inode(0, x).parse(manager.read(x, 1024));
                 i.pretty_print();
             }
             operationEnd();
@@ -1282,8 +1278,11 @@ public class LogFS extends FuseStubFS {
             close(p);
             f = new MemoryFile(fid, 1);
             f.inode.hardLinks -= 1;
-            // TODO: WKL- if the number of hardlinks is zero, then delete this file
-            f.flush();
+            if (f.inode.hardLinks == 0){
+                f.delete();
+            }else{
+                f.flush();
+            }
             close(f);
             operationEnd();
             return 0;
