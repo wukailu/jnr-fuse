@@ -4,7 +4,6 @@ import java.nio.ByteBuffer;
 import java.util.BitSet;
 
 public class Checkpoint extends writableObject<Checkpoint>{
-    // TODO: YSY- add a free block bitmap. Now a Checkpoint has 12.5KB data.
     public int lastInodeMap; // point to next block of last inode map
     public BitSet free;
     public long beginTime;
