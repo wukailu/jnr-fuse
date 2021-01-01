@@ -132,11 +132,11 @@ public class LogFS extends FuseStubFS {
             return (tag * (cacheSize / cacheWay) + index) * blockSize;
         }
 
-        private void update(int address, ByteBuffer data)
+        private boolean update(int address, ByteBuffer data)
         {
 //            System.out.printf("Update: %d !!!\n",address);
             if(!free.get(address / blockSize))
-                return;
+                return false;
             memoryLock.unlock();
             diskLock.lock();
             byte[] x = data.array();
@@ -148,6 +148,7 @@ public class LogFS extends FuseStubFS {
             }
             diskLock.unlock();
             memoryLock.lock();
+            return true;
         }
 
         private ByteBuffer fetch(int address, int len)
@@ -196,7 +197,14 @@ public class LogFS extends FuseStubFS {
                 tag[index * cacheWay + i] = tag_;
                 valid[index * cacheWay + i] = true;
                 dirty[index * cacheWay + i] = dirty_;
-                update(a,d);
+                if(update(a,d))
+                {
+                    try {
+                        rafile.getFD().sync();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
             }
         }
 
