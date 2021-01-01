@@ -768,7 +768,7 @@ public class LogFS extends FuseStubFS {
             if (type == 0) {
                 System.out.println(subinfo);
             } else if (type == 1) {
-                info += subinfo + '\n';
+                //info += subinfo + '\n';
             }
         }
     }
@@ -1428,7 +1428,6 @@ public class LogFS extends FuseStubFS {
 
     @Override
     public int flush(String path, FuseFileInfo fi) {
-        // TODO: do we need operation end?
         logger.log("[INFO]: flush, " + path + ", " + fi);
         return 0;
     }
