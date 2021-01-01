@@ -65,8 +65,6 @@ public class LogFS extends FuseStubFS {
         newInodeMap = new HashMap<Integer, Integer>();
         inodeCnt = 0;
         int lastInodeMap = checkpoint.lastInodeMap;
-//        System.out.println(total_size);
-//        System.out.println(lastInodeMap);
         List<InodeMap> f = new ArrayList<>();
         while (lastInodeMap > 0){
             InodeMap inodeMap = new InodeMap().parse(mem, lastInodeMap, 1024);
@@ -134,7 +132,6 @@ public class LogFS extends FuseStubFS {
 
         private boolean update(int address, ByteBuffer data)
         {
-//            System.out.printf("Update: %d !!!\n",address);
             if(!free.get(address / blockSize))
                 return false;
             memoryLock.unlock();
@@ -155,7 +152,7 @@ public class LogFS extends FuseStubFS {
         {
             memoryLock.unlock();
             diskLock.lock();
-            Long startTime = System.nanoTime();
+//            Long startTime = System.nanoTime();
             byte[] x = new byte[len];
             try {
                 rafile.seek(address);
@@ -164,7 +161,7 @@ public class LogFS extends FuseStubFS {
                 e.printStackTrace();
             }
             diskLock.unlock();
-            System.out.println("Time until read finish, " + (System.nanoTime()-startTime));
+//            System.out.println("Time until read finish, " + (System.nanoTime()-startTime));
             memoryLock.lock();
             return ByteBuffer.wrap(x);
         }
@@ -294,7 +291,6 @@ public class LogFS extends FuseStubFS {
         }
 
         public void release(int address){
-//            System.out.printf("Release: %d !!!\n",address);
             assert address % blockSize == 0;
             memoryLock.lock();
             free.set(address / blockSize, false);
@@ -311,12 +307,10 @@ public class LogFS extends FuseStubFS {
             put(address, data, true);
             numUpdateBlock++;
             memoryLock.unlock();
-            System.out.printf("Write: %d !!!\n",address);
             return address;
         }
 
         public ByteBuffer read(int startAddress, int len){
-//            System.out.printf("Read: %d %d !!!\n",startAddress,len);
             assert len <= blockSize;
             memoryLock.lock();
             ByteBuffer ret = get(startAddress);
@@ -521,28 +515,28 @@ public class LogFS extends FuseStubFS {
         private final Map<Integer, ReadWriteLock> fileLockMap = new HashMap<Integer, ReadWriteLock>();
 
         public void acquireReadLock(int id) {
-            System.out.println("[DEBUG] accquire read lock " + id + " begin");
+            logger.log("[DEBUG] accquire read lock " + id + " begin");
             Lock rlock = getReadLock(id);
             rlock.lock();
-            System.out.println("[DEBUG] accquire read lock " + id + " end");
+            logger.log("[DEBUG] accquire read lock " + id + " end");
         }
         public void releaseReadLock(int id) {
-            System.out.println("[DEBUG] release read lock " + id + " begin");
+            logger.log("[DEBUG] release read lock " + id + " begin");
             Lock rlock = getReadLock(id);
             rlock.unlock();
-            System.out.println("[DEBUG] release read lock " + id + " end");
+            logger.log("[DEBUG] release read lock " + id + " end");
         }
         public void acquireWriteLock(int id) {
-            System.out.println("[DEBUG] accquire write lock " + id + " begin");
+            logger.log("[DEBUG] accquire write lock " + id + " begin");
             Lock wlock = getWriteLock(id);
             wlock.lock();
-            System.out.println("[DEBUG] accquire write lock " + id + " end");
+            logger.log("[DEBUG] accquire write lock " + id + " end");
         }
         public void releaseWriteLock(int id) {
-            System.out.println("[DEBUG] release write lock " + id + " begin");
+            logger.log("[DEBUG] release write lock " + id + " begin");
             Lock wlock = getWriteLock(id);
             wlock.unlock();
-            System.out.println("[DEBUG] release write lock " + id + " end");
+            logger.log("[DEBUG] release write lock " + id + " end");
         }
         private synchronized ReadWriteLock getReadWriteLock(int id) {
             ReadWriteLock rwlock = fileLockMap.get(id);
@@ -779,7 +773,7 @@ public class LogFS extends FuseStubFS {
         }
     }
 
-    private final Logger logger = new Logger(0);
+    private final Logger logger = new Logger(1);
 
     private class block_dump
     {
@@ -1008,8 +1002,6 @@ public class LogFS extends FuseStubFS {
     public int access(String path, int mask) {
         operationBegin();
         logger.log("[INFO]: access, " + path + ", " + mask);
-//        System.out.println("[INFO] UIDGID: " + getContext().uid.intValue() + "  " + getContext().gid.intValue());
-//        System.out.println(AccessConstants.F_OK + ", " + AccessConstants.R_OK + ", " + AccessConstants.W_OK + ", " + AccessConstants.X_OK);
         MemoryFile p = null;
         try{
             p = new MemoryFile(path, 0); // check permission
@@ -1343,13 +1335,13 @@ public class LogFS extends FuseStubFS {
     @Override
     public int open(String path, FuseFileInfo fi) {
         operationBegin();
-        logger.log("[INFO]: open, " + mountPoint + path);
-        System.out.println("[INFO]: open " + fi.flags.intValue());
-        System.out.println(OpenFlags.O_RDONLY.intValue());
-        System.out.println(OpenFlags.O_WRONLY.intValue());
-        System.out.println(OpenFlags.O_RDWR.intValue());
-        System.out.println(OpenFlags.O_APPEND.intValue());
-        System.out.println(OpenFlags.O_EXCL.intValue());
+        logger.log("[INFO]: open, " + mountPoint + path + " "
+            + " " + fi.flags.intValue()
+            + " " + OpenFlags.O_RDONLY.intValue()
+            + " " + OpenFlags.O_WRONLY.intValue()
+            + " " + OpenFlags.O_RDWR.intValue()
+            + " " + OpenFlags.O_APPEND.intValue()
+            + " " + OpenFlags.O_EXCL.intValue());
 
         MemoryFile p = null, q = null;
         try{
