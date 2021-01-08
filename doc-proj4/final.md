@@ -1,6 +1,8 @@
 # Project 4: Log File System
 > Group Member: 陈通, 吴凯路, 闫书弈
+>
 > Github repo: https://github.com/wukailu/jnr-fuse
+>
 > Github invitation link: https://github.com/wukailu/jnr-fuse/invitations
 
 ## 1) Main Data Structures Of File System
@@ -29,7 +31,7 @@ In `src/main/java/ru.serce.jnrfuse/proj3`,
 
 ## 3) Tasks
 
-* Task 2: To avoid disk accesses hindering memory operations, we have a disk lock and a memory lock. At one time a thread can only have at most one of them, so a thread waiting for I/O will not hold CPU.
+* Task 2: We add a read write lock for each file (i.e., each inode). To avoid disk accesses hindering memory operations, we have a disk lock and a memory lock. At one time a thread can only have at most one of them, so a thread waiting for I/O will not hold CPU.
 * Task 3: There is a write-back cache in `MemoryManager`.
 * Task 4: `MemoryManager` maintains a bitset to record whether each block is free. When a block becomes garbage, its position will be reported to `MemoryManager` immediately. When a new block needs to be written, `MemoryManager` will allocate a free block to it. When doing `sync`, `MemoryManager` will update this table to checkpoints.  
 
